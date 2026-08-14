@@ -8,13 +8,18 @@ from typing import Literal
 from playwright.async_api import (
     Browser,
     BrowserContext,
-    ElementHandle,
+    ConsoleMessage,
+    Locator,
     Page,
     Playwright,
+    Request,
     async_playwright,
 )
 
+from qa_agent.assertions import AssertionResult, BrowserAssertion, evaluate_assertion
+
 MAX_INTERACTIVE_ELEMENTS = 100
+MAX_RECORDED_ERRORS = 100
 INTERACTIVE_SELECTOR = ",".join(
     (
         "a[href]",
@@ -36,6 +41,126 @@ INTERACTIVE_SELECTOR = ",".join(
         "[role=spinbutton]",
     )
 )
+OBSERVE_INTERACTIVE_ELEMENTS = r"""
+(elements, limit) => {
+    const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+    const isAvailable = (element) => {
+        for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            if (
+                ancestor.getAttribute('aria-hidden') === 'true' ||
+                ancestor.inert ||
+                style.display === 'none' ||
+                ['hidden', 'collapse'].includes(style.visibility) ||
+                Number(style.opacity) === 0
+            ) {
+                return false;
+            }
+        }
+
+        const rect = element.getBoundingClientRect();
+        const visibleBounds = {
+            left: Math.max(0, rect.left),
+            right: Math.min(innerWidth, rect.right),
+            top: Math.max(0, rect.top),
+            bottom: Math.min(innerHeight, rect.bottom),
+        };
+        if (
+            visibleBounds.right <= visibleBounds.left ||
+            visibleBounds.bottom <= visibleBounds.top
+        ) {
+            return false;
+        }
+
+        const hit = document.elementFromPoint(
+            (visibleBounds.left + visibleBounds.right) / 2,
+            (visibleBounds.top + visibleBounds.bottom) / 2,
+        );
+        return Boolean(
+            hit && (hit === element || element.contains(hit) || hit.control === element),
+        );
+    };
+
+    const inferredRole = (element) => {
+        const explicitRole = element.getAttribute('role');
+        if (explicitRole) return explicitRole;
+        if (element.tagName === 'A') return 'link';
+        if (element.tagName === 'BUTTON') return 'button';
+        if (element.tagName === 'SELECT') return 'combobox';
+        if (element.tagName === 'TEXTAREA' || element.isContentEditable) return 'textbox';
+        if (element.tagName !== 'INPUT') return 'unknown';
+
+        const type = (element.type || 'text').toLowerCase();
+        if (['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'range') return 'slider';
+        if (type === 'number') return 'spinbutton';
+        return 'textbox';
+    };
+
+    const accessibleName = (element) => {
+        const labelledBy = element.getAttribute('aria-labelledby');
+        const referenced = labelledBy
+            ? labelledBy
+                .split(/\s+/)
+                .map((id) => document.getElementById(id)?.textContent)
+                .join(' ')
+            : '';
+        const labels = Array.from(element.labels ?? [], (label) => label.textContent).join(' ');
+        const buttonValue =
+            element.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(element.type)
+                ? element.value
+                : '';
+        const ownImageAlt =
+            element.tagName === 'INPUT' && element.type === 'image'
+                ? element.getAttribute('alt')
+                : '';
+        const visibleText =
+            ['A', 'BUTTON'].includes(element.tagName) ||
+            ['button', 'link'].includes(element.getAttribute('role'))
+                ? element.innerText
+                : '';
+        const imageAlt = Array.from(
+            element.querySelectorAll('img[alt]'),
+            (image) => image.alt,
+        ).join(' ');
+        const candidates = [
+            element.getAttribute('aria-label'),
+            referenced,
+            labels,
+            buttonValue,
+            ownImageAlt,
+            visibleText,
+            imageAlt,
+            element.getAttribute('placeholder'),
+            element.getAttribute('title'),
+            element.getAttribute('name'),
+        ];
+        return normalize(candidates.find((value) => normalize(value))).slice(0, 200);
+    };
+
+    const observations = [];
+    for (const [candidateIndex, element] of elements.entries()) {
+        if (observations.length === limit) break;
+        if (!isAvailable(element)) continue;
+
+        observations.push({
+            candidate_index: candidateIndex,
+            id: observations.length + 1,
+            role: inferredRole(element),
+            name: accessibleName(element),
+            tag: element.tagName.toLowerCase(),
+            input_type: element.tagName === 'INPUT' ? element.type : null,
+            disabled: Boolean(
+                element.disabled || element.getAttribute('aria-disabled') === 'true',
+            ),
+        });
+    }
+    return observations;
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -102,28 +227,18 @@ class BrowserSession:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self.page: Page | None = None
-        self._element_refs: dict[int, ElementHandle] = {}
+        self._element_refs: dict[int, Locator] = {}
 
     async def __aenter__(self) -> BrowserSession:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch()
         self._context = await self._browser.new_context()
         await self._context.tracing.start(
-            screenshots=True, snapshots=True, sources=True
+            screenshots=True, snapshots=True
         )
         self.page = await self._context.new_page()
-        self.page.on(
-            "console",
-            lambda message: self.console_errors.append(message.text)
-            if message.type == "error"
-            else None,
-        )
-        self.page.on(
-            "requestfailed",
-            lambda request: self.failed_requests.append(
-                f"{request.method} {request.url}: {request.failure or 'unknown failure'}"
-            ),
-        )
+        self.page.on("console", self._record_console_error)
+        self.page.on("requestfailed", self._record_failed_request)
         return self
 
     async def __aexit__(
@@ -132,7 +247,7 @@ class BrowserSession:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        await self._clear_element_refs()
+        self._element_refs.clear()
         if self._context:
             await self._context.tracing.stop(path=self.trace_path)
             await self._context.close()
@@ -150,62 +265,18 @@ class BrowserSession:
     async def observe(self) -> PageObservation:
         if not self.page:
             raise RuntimeError("BrowserSession must be entered before use")
-        await self._clear_element_refs()
+        self._element_refs.clear()
+        candidates = self.page.locator(INTERACTIVE_SELECTOR)
+        raw_elements = await candidates.evaluate_all(
+            OBSERVE_INTERACTIVE_ELEMENTS,
+            MAX_INTERACTIVE_ELEMENTS,
+        )
         elements: list[InteractiveElement] = []
-        handles = await self.page.locator(INTERACTIVE_SELECTOR).element_handles()
-        for handle in handles:
-            if len(elements) == MAX_INTERACTIVE_ELEMENTS:
-                await handle.dispose()
-                continue
-            if not await handle.is_visible():
-                await handle.dispose()
-                continue
-            element_id = len(elements) + 1
-            raw_element = await handle.evaluate(
-                r"""(element, id) => {
-                const inferredRole = (element) => {
-                    if (element.getAttribute('role')) return element.getAttribute('role');
-                    if (element.tagName === 'A') return 'link';
-                    if (element.tagName === 'BUTTON') return 'button';
-                    if (element.tagName === 'SELECT') return 'combobox';
-                    if (element.tagName === 'TEXTAREA') return 'textbox';
-                    if (element.isContentEditable) return 'textbox';
-                    if (element.tagName === 'INPUT') {
-                        const type = (element.type || 'text').toLowerCase();
-                        if (['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
-                        if (type === 'checkbox') return 'checkbox';
-                        if (type === 'radio') return 'radio';
-                        if (type === 'range') return 'slider';
-                        if (type === 'number') return 'spinbutton';
-                        return 'textbox';
-                    }
-                    return 'unknown';
-                };
-                const accessibleName = (element) => {
-                    const labelledBy = element.getAttribute('aria-labelledby');
-                    const referenced = labelledBy
-                        ? labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' ')
-                        : '';
-                    const labels = Array.from(element.labels || []).map((label) => label.innerText).join(' ');
-                    const buttonValue = element.tagName === 'INPUT' &&
-                        ['button', 'submit', 'reset'].includes(element.type) ? element.value : '';
-                    return (element.getAttribute('aria-label') || referenced || labels ||
-                        buttonValue || element.innerText || element.getAttribute('placeholder') ||
-                        element.getAttribute('title') || element.getAttribute('name') || '').trim().slice(0, 200);
-                };
-                return {
-                    id,
-                    role: inferredRole(element),
-                    name: accessibleName(element),
-                    tag: element.tagName.toLowerCase(),
-                    input_type: element.tagName === 'INPUT' ? element.type : null,
-                    disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
-                };
-            }""",
-                element_id,
-            )
-            self._element_refs[element_id] = handle
-            elements.append(InteractiveElement(**raw_element))
+        for raw_element in raw_elements:
+            candidate_index = raw_element.pop("candidate_index")
+            element = InteractiveElement(**raw_element)
+            self._element_refs[element.id] = candidates.nth(candidate_index)
+            elements.append(element)
         return PageObservation(
             url=self.page.url,
             title=await self.page.title(),
@@ -213,8 +284,8 @@ class BrowserSession:
         )
 
     async def execute(self, action: BrowserAction) -> ActionResult:
-        handle = self._element_refs.get(action.element_id)
-        if not handle:
+        locator = self._element_refs.get(action.element_id)
+        if not locator:
             return ActionResult(
                 action=action.action,
                 element_id=action.element_id,
@@ -223,7 +294,7 @@ class BrowserSession:
             )
 
         try:
-            if not await handle.is_enabled():
+            if not await locator.is_enabled():
                 return ActionResult(
                     action=action.action,
                     element_id=action.element_id,
@@ -231,9 +302,9 @@ class BrowserSession:
                     error="Element is disabled",
                 )
             if isinstance(action, ClickAction):
-                await handle.click()
+                await locator.click()
             else:
-                await handle.fill(action.value)
+                await locator.fill(action.value)
             return ActionResult(
                 action=action.action,
                 element_id=action.element_id,
@@ -247,17 +318,36 @@ class BrowserSession:
                 error=f"{type(exc).__name__}: {exc}",
             )
         finally:
-            await self._clear_element_refs()
+            self._element_refs.clear()
 
-    async def _clear_element_refs(self) -> None:
-        for handle in self._element_refs.values():
-            await handle.dispose()
-        self._element_refs.clear()
+    async def assert_that(
+        self,
+        assertion: BrowserAssertion,
+        *,
+        timeout_ms: float = 5_000,
+    ) -> AssertionResult:
+        if not self.page:
+            raise RuntimeError("BrowserSession must be entered before use")
+        return await evaluate_assertion(
+            self.page,
+            assertion,
+            timeout_ms=timeout_ms,
+        )
+
+    def _record_console_error(self, message: ConsoleMessage) -> None:
+        if message.type == "error" and len(self.console_errors) < MAX_RECORDED_ERRORS:
+            self.console_errors.append(message.text)
+
+    def _record_failed_request(self, request: Request) -> None:
+        if len(self.failed_requests) < MAX_RECORDED_ERRORS:
+            self.failed_requests.append(
+                f"{request.method} {request.url}: {request.failure or 'unknown failure'}"
+            )
 
     async def screenshot(self, path: Path) -> None:
         if not self.page:
             raise RuntimeError("BrowserSession must be entered before use")
-        await self.page.screenshot(path=path, full_page=True)
+        await self.page.screenshot(path=path)
 
 
 async def inspect_page(
