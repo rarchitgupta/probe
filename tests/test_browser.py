@@ -19,13 +19,17 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
             <button onclick="document.title = 'Dashboard'">Login</button>
         """
         with tempfile.TemporaryDirectory() as directory:
-            async with BrowserSession(trace_path=Path(directory) / "trace.zip") as session:
+            async with BrowserSession(
+                trace_path=Path(directory) / "trace.zip"
+            ) as session:
                 await session.navigate(f"data:text/html,{quote(html)}")
 
                 observation = await session.observe()
                 username_id = observation.elements[0].id
                 result = await session.execute(
-                    FillAction(action="fill", element_id=username_id, value="standard_user")
+                    FillAction(
+                        action="fill", element_id=username_id, value="standard_user"
+                    )
                 )
                 self.assertTrue(result.success)
 

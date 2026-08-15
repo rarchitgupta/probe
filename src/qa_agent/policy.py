@@ -49,9 +49,7 @@ class ExecutionGuard:
 
     def record_action(self) -> None:
         if self.actions >= self.policy.max_actions:
-            raise PolicyViolation(
-                f"Action limit of {self.policy.max_actions} reached"
-            )
+            raise PolicyViolation(f"Action limit of {self.policy.max_actions} reached")
         self.actions += 1
 
     @property

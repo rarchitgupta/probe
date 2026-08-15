@@ -181,18 +181,6 @@ class PageObservation:
 
 
 @dataclass(frozen=True)
-class BrowserObservation:
-    requested_url: str
-    final_url: str | None
-    title: str | None
-    http_status: int | None
-    elements: tuple[InteractiveElement, ...]
-    console_errors: tuple[str, ...]
-    failed_requests: tuple[str, ...]
-    error: str | None = None
-
-
-@dataclass(frozen=True)
 class ClickAction:
     action: Literal["click"]
     element_id: int
@@ -233,9 +221,7 @@ class BrowserSession:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch()
         self._context = await self._browser.new_context()
-        await self._context.tracing.start(
-            screenshots=True, snapshots=True
-        )
+        await self._context.tracing.start(screenshots=True, snapshots=True)
         self.page = await self._context.new_page()
         self.page.on("console", self._record_console_error)
         self.page.on("requestfailed", self._record_failed_request)
@@ -348,43 +334,3 @@ class BrowserSession:
         if not self.page:
             raise RuntimeError("BrowserSession must be entered before use")
         await self.page.screenshot(path=path)
-
-
-async def inspect_page(
-    url: str,
-    *,
-    screenshot_path: Path,
-    trace_path: Path,
-) -> BrowserObservation:
-    final_url: str | None = None
-    title: str | None = None
-    http_status: int | None = None
-    elements: tuple[InteractiveElement, ...] = ()
-    error: str | None = None
-
-    async with BrowserSession(trace_path=trace_path) as session:
-        try:
-            http_status = await session.navigate(url)
-            observation = await session.observe()
-            final_url = observation.url
-            title = observation.title
-            elements = observation.elements
-            await session.screenshot(screenshot_path)
-        except Exception as exc:
-            final_url = session.page.url if session.page else None
-            error = f"{type(exc).__name__}: {exc}"
-            try:
-                await session.screenshot(screenshot_path)
-            except Exception:
-                pass
-
-        return BrowserObservation(
-            requested_url=url,
-            final_url=final_url,
-            title=title,
-            http_status=http_status,
-            elements=elements,
-            console_errors=tuple(session.console_errors),
-            failed_requests=tuple(session.failed_requests),
-            error=error,
-        )

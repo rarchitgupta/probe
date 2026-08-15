@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from qa_agent.assertions import TextVisibleAssertion, TitleEqualsAssertion
+from qa_agent.policy import ExecutionPolicy
 from qa_agent.scenario import (
     ClickStep,
     ElementTarget,
@@ -14,7 +15,6 @@ from qa_agent.scenario import (
     ScenarioTask,
     execute_scenario,
 )
-from qa_agent.policy import ExecutionPolicy
 
 
 class ScenarioRunnerTest(unittest.IsolatedAsyncioTestCase):

@@ -1,46 +1,60 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import quote
 
 from pydantic_ai import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from qa_agent.agent import AgentDeps, AgentOutcome, browser_agent
-from qa_agent.browser import BrowserSession
+from qa_agent.agent import (
+    AgentDeps,
+    AgentTask,
+    browser_agent,
+    build_agent_prompt,
+)
+from qa_agent.browser import BrowserSession, InteractiveElement, PageObservation
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
 
 class BrowserAgentTest(unittest.IsolatedAsyncioTestCase):
-    async def test_executes_typed_tools_without_a_real_model(self) -> None:
+    def test_builds_compact_prompt(self) -> None:
+        prompt = build_agent_prompt(
+            AgentTask(goal="Sign in", start_url="https://example.com/login"),
+            PageObservation(
+                url="https://example.com/login",
+                title="Login",
+                elements=(
+                    InteractiveElement(1, "textbox", "Email", "input", "email", False),
+                ),
+            ),
+        )
+
+        data = json.loads(prompt)
+        self.assertEqual(data["goal"], "Sign in")
+        self.assertEqual(data["page"]["elements"][0]["name"], "Email")
+        self.assertNotIn("tag", prompt)
+
+    async def test_rejects_unverified_success(self) -> None:
         calls = 0
 
         async def respond(messages: list, info: AgentInfo) -> ModelResponse:
             nonlocal calls
             calls += 1
-            if calls == 1:
-                return ModelResponse(
-                    parts=[ToolCallPart("fill", {"element_id": 1, "value": "Ada"})]
-                )
             output_tool = info.output_tools[0].name
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        output_tool,
-                        {
-                            "status": "passed",
-                            "summary": "Name entered",
-                            "evidence": ["Name field contains Ada"],
-                        },
-                    )
-                ]
+            outcome = (
+                {
+                    "status": "passed",
+                    "summary": "Done",
+                    "evidence": ["invented"],
+                }
+                if calls == 1
+                else {"status": "failed", "summary": "Not verified", "evidence": []}
             )
+            return ModelResponse(parts=[ToolCallPart(output_tool, outcome)])
 
-        url = "data:text/html," + quote(
-            '<label for="name">Name</label><input id="name">'
-        )
+        url = "data:text/html,<title>Page</title>"
         policy = ExecutionPolicy().for_start_url(url)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -48,20 +62,15 @@ class BrowserAgentTest(unittest.IsolatedAsyncioTestCase):
                 trace_path=Path(directory) / "trace.zip"
             ) as browser:
                 await browser.navigate(url)
-                observation = await browser.observe()
                 result = await browser_agent.run(
-                    f"Goal: enter a name\nCurrent page: {observation}",
+                    "Verify the page",
                     deps=AgentDeps(browser, ExecutionGuard(policy)),
                     model=FunctionModel(respond),
                 )
-                value = await browser.page.locator("#name").input_value()
 
-        self.assertEqual(value, "Ada")
-        self.assertEqual(result.output, AgentOutcome(
-            status="passed",
-            summary="Name entered",
-            evidence=["Name field contains Ada"],
-        ))
+        self.assertEqual(calls, 2)
+        self.assertEqual(result.output.status, "failed")
+        self.assertEqual(result.output.evidence, [])
 
 
 if __name__ == "__main__":

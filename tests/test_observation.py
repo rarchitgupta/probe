@@ -25,7 +25,9 @@ class BrowserObservationTest(unittest.IsolatedAsyncioTestCase):
             <a href="/cart"><img alt="Shopping cart"></a>
         """
         with tempfile.TemporaryDirectory() as directory:
-            async with BrowserSession(trace_path=Path(directory) / "trace.zip") as session:
+            async with BrowserSession(
+                trace_path=Path(directory) / "trace.zip"
+            ) as session:
                 await session.navigate(f"data:text/html,{quote(html)}")
                 observation = await session.observe()
 

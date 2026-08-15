@@ -37,8 +37,7 @@ class FillStep:
     value: str
 
 
-ScenarioAction = ClickStep | FillStep
-ScenarioStep = ScenarioAction | BrowserAssertion
+ScenarioStep = ClickStep | FillStep | BrowserAssertion
 
 
 @dataclass(frozen=True)
@@ -84,12 +83,10 @@ def resolve_target(
         if element.role == target.role and element.name == target.name
     ]
     if not matches:
-        raise TargetResolutionError(
-            f'No visible {target.role!r} named {target.name!r}'
-        )
+        raise TargetResolutionError(f"No visible {target.role!r} named {target.name!r}")
     if len(matches) > 1:
         raise TargetResolutionError(
-            f'Found {len(matches)} visible {target.role!r} elements named {target.name!r}'
+            f"Found {len(matches)} visible {target.role!r} elements named {target.name!r}"
         )
     return matches[0]
 
@@ -157,7 +154,9 @@ async def _execute_step(
     except PolicyViolation as exc:
         return ScenarioStepResult(
             index=index,
-            operation=step.action if isinstance(step, (ClickStep, FillStep)) else "policy",
+            operation=step.action
+            if isinstance(step, (ClickStep, FillStep))
+            else "policy",
             success=False,
             target=step.target if isinstance(step, (ClickStep, FillStep)) else None,
             error=str(exc),

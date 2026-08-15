@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 @dataclass(frozen=True)
