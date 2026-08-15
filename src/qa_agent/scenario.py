@@ -14,6 +14,7 @@ from qa_agent.browser import (
     InteractiveElement,
     PageObservation,
 )
+from qa_agent.execution import execute_guarded_action
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation
 
 
@@ -153,8 +154,6 @@ async def _execute_step(
 ) -> ScenarioStepResult:
     try:
         guard.check_url(session.page.url if session.page else "")
-        if isinstance(step, (ClickStep, FillStep)):
-            guard.record_action()
     except PolicyViolation as exc:
         return ScenarioStepResult(
             index=index,
@@ -180,19 +179,13 @@ async def _execute_step(
             if isinstance(step, ClickStep)
             else FillAction("fill", element.id, step.value)
         )
-        action_result = await session.execute(action)
-        error = action_result.error
-        if action_result.success:
-            try:
-                guard.check_url(session.page.url if session.page else "")
-            except PolicyViolation as exc:
-                error = str(exc)
+        action_result = await execute_guarded_action(session, guard, action)
         return ScenarioStepResult(
             index=index,
             operation=step.action,
-            success=action_result.success and error is None,
+            success=action_result.success,
             target=step.target,
-            error=error,
+            error=action_result.error,
         )
 
     assertion_result = await session.assert_that(step)
