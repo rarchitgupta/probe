@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Literal
@@ -24,6 +25,12 @@ from qa_agent.browser import (
 )
 from qa_agent.execution import execute_guarded_action
 from qa_agent.policy import ExecutionGuard, PolicyViolation
+
+SENSITIVE_SUMMARY_VALUE = re.compile(
+    r"(\b(?:password|passcode|api[ _-]?key|access[ _-]?token)\b\s*"
+    r"(?:is\s+|[:=]\s*|\s+))([^\s,;.]+)",
+    re.IGNORECASE,
+)
 
 
 class AgentTask(BaseModel):
@@ -61,11 +68,29 @@ class ToolResult(BaseModel):
     observation: PageState | None = None
 
 
+@dataclass(frozen=True)
+class ActionDiagnostic:
+    action: Literal["click", "fill"]
+    element_id: int
+    role: str | None
+    input_type: str | None
+    success: bool
+    url_changed: bool
+    value_length: int | None = None
+    changed_from_previous: bool | None = None
+
+
 @dataclass
 class AgentDeps:
     browser: BrowserSession
     guard: ExecutionGuard
     evidence: list[str] = dataclass_field(default_factory=list)
+    elements: dict[int, ElementState] = dataclass_field(default_factory=dict)
+    diagnostics: list[ActionDiagnostic] = dataclass_field(default_factory=list)
+    previous_fill_values: dict[tuple[int, str | None], str] = dataclass_field(
+        default_factory=dict
+    )
+    sensitive_values: set[str] = dataclass_field(default_factory=set)
 
 
 def page_state(observation: PageObservation) -> PageState:
@@ -91,6 +116,13 @@ def build_agent_prompt(task: AgentTask, observation: PageObservation) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def sanitize_summary(summary: str, sensitive_values: set[str] | None = None) -> str:
+    summary = SENSITIVE_SUMMARY_VALUE.sub(r"\1[REDACTED]", summary)
+    for value in sorted(sensitive_values or (), key=len, reverse=True):
+        summary = summary.replace(value, "[REDACTED]")
+    return summary
 
 
 async def click(ctx: RunContext[AgentDeps], element_id: int) -> ToolResult:
@@ -136,19 +168,44 @@ async def _execute(
     ctx: RunContext[AgentDeps],
     action: ClickAction | FillAction,
 ) -> ToolResult:
+    target = ctx.deps.elements.get(action.element_id)
+    before_url = ctx.deps.browser.page.url if ctx.deps.browser.page else ""
+    value_length: int | None = None
+    changed_from_previous: bool | None = None
+    if isinstance(action, FillAction):
+        value_length = len(action.value)
+        if target and target.input_type == "password":
+            ctx.deps.sensitive_values.add(action.value)
+        key = (action.element_id, target.input_type if target else None)
+        previous = ctx.deps.previous_fill_values.get(key)
+        changed_from_previous = previous is not None and previous != action.value
+        ctx.deps.previous_fill_values[key] = action.value
+
     result = await execute_guarded_action(ctx.deps.browser, ctx.deps.guard, action)
+    after_url = ctx.deps.browser.page.url if ctx.deps.browser.page else ""
+    diagnostic = ActionDiagnostic(
+        action=action.action,
+        element_id=action.element_id,
+        role=target.role if target else None,
+        input_type=target.input_type if target else None,
+        success=result.success,
+        url_changed=before_url != after_url,
+        value_length=value_length,
+        changed_from_previous=changed_from_previous,
+    )
+    ctx.deps.diagnostics.append(diagnostic)
     try:
-        ctx.deps.guard.check_url(
-            ctx.deps.browser.page.url if ctx.deps.browser.page else ""
-        )
+        ctx.deps.guard.check_url(after_url)
     except PolicyViolation:
         return ToolResult(success=False, error=result.error)
 
     observation = await ctx.deps.browser.observe()
+    state = page_state(observation)
+    ctx.deps.elements = {element.id: element for element in state.elements}
     return ToolResult(
         success=result.success,
         error=result.error,
-        observation=page_state(observation),
+        observation=state,
     )
 
 
@@ -205,4 +262,9 @@ async def validate_outcome(
         raise ModelRetry(
             "Run a successful assertion before reporting that the QA goal passed."
         )
-    return outcome.model_copy(update={"evidence": ctx.deps.evidence.copy()})
+    return outcome.model_copy(
+        update={
+            "summary": sanitize_summary(outcome.summary, ctx.deps.sensitive_values),
+            "evidence": ctx.deps.evidence.copy(),
+        }
+    )

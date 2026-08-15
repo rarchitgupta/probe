@@ -1,19 +1,34 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
+from langfuse import propagate_attributes
 from pydantic_ai import UsageLimits
 from pydantic_ai.models import Model
 
-from qa_agent.agent import AgentDeps, AgentTask, browser_agent, build_agent_prompt
+from qa_agent.agent import (
+    ActionDiagnostic,
+    AgentDeps,
+    AgentTask,
+    browser_agent,
+    build_agent_prompt,
+    page_state,
+)
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser import BrowserSession, InteractiveElement
 from qa_agent.llm import DEEPSEEK_SETTINGS, deepseek_model
+from qa_agent.observability import configure_observability
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
+
+logger = logging.getLogger(__name__)
 
 AGENT_USAGE_LIMITS = UsageLimits(
     request_limit=20,
@@ -54,6 +69,7 @@ class AgentTaskResult:
     http_status: int | None
     summary: str | None
     evidence: tuple[str, ...]
+    diagnostics: tuple[ActionDiagnostic, ...]
     usage: dict[str, object]
     error: str | None
     artifact_directory: str
@@ -114,6 +130,13 @@ async def execute_agent_task(
     usage_limits: UsageLimits = AGENT_USAGE_LIMITS,
     artifact_root: Path = Path(".runs"),
 ) -> AgentTaskResult:
+    load_dotenv()
+    keep_diagnostics = os.getenv("QA_AGENT_DIAGNOSTICS", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    langfuse = configure_observability() if model is None else None
     artifacts = ArtifactPaths.create(artifact_root, task.task_id)
     guard = ExecutionGuard(policy.for_start_url(str(task.start_url)))
     status: Literal["passed", "failed", "blocked", "error"] = "error"
@@ -121,6 +144,7 @@ async def execute_agent_task(
     http_status: int | None = None
     summary: str | None = None
     evidence: tuple[str, ...] = ()
+    diagnostics: tuple[ActionDiagnostic, ...] = ()
     usage: dict[str, object] = {}
     error: str | None = None
 
@@ -134,18 +158,43 @@ async def execute_agent_task(
                     final_url = browser.page.url if browser.page else None
                     guard.check_url(final_url or "")
                     observation = await browser.observe()
-                    deps = AgentDeps(browser, guard)
-                    selected_model = model or deepseek_model()
-                    run = await browser_agent.run(
-                        build_agent_prompt(task, observation),
-                        deps=deps,
-                        model=selected_model,
-                        model_settings=None if model else DEEPSEEK_SETTINGS,
-                        usage_limits=usage_limits,
+                    initial_state = page_state(observation)
+                    deps = AgentDeps(
+                        browser,
+                        guard,
+                        elements={
+                            element.id: element for element in initial_state.elements
+                        },
                     )
+                    selected_model = model or deepseek_model()
+                    trace_context = (
+                        propagate_attributes(
+                            session_id=task.task_id,
+                            metadata={
+                                "task_id": task.task_id,
+                                "target_host": task.start_url.host,
+                            },
+                            tags=["browser-qa"],
+                            trace_name="browser-qa-task",
+                        )
+                        if langfuse
+                        else nullcontext()
+                    )
+                    with (
+                        trace_context,
+                        browser_agent.parallel_tool_call_execution_mode("sequential"),
+                    ):
+                        run = await browser_agent.run(
+                            build_agent_prompt(task, observation),
+                            deps=deps,
+                            model=selected_model,
+                            model_settings=None if model else DEEPSEEK_SETTINGS,
+                            usage_limits=usage_limits,
+                        )
                     status = run.output.status
                     summary = run.output.summary
                     evidence = tuple(run.output.evidence)
+                    diagnostics = tuple(deps.diagnostics)
                     usage = asdict(run.usage)
                     if usage.get("cost") is not None:
                         usage["cost"] = str(usage["cost"])
@@ -160,6 +209,9 @@ async def execute_agent_task(
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
 
+    if status == "passed" and not keep_diagnostics:
+        diagnostics = ()
+
     result = AgentTaskResult(
         task_id=task.task_id,
         status=status,
@@ -168,9 +220,15 @@ async def execute_agent_task(
         http_status=http_status,
         summary=summary,
         evidence=evidence,
+        diagnostics=diagnostics,
         usage=usage,
         error=error,
         artifact_directory=str(artifacts.run),
     )
     artifacts.write_result(asdict(result))
+    if langfuse:
+        try:
+            langfuse.flush()
+        except Exception:
+            logger.exception("Langfuse flush failed")
     return result

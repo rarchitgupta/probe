@@ -16,7 +16,10 @@ from qa_agent.runner import execute_agent_task
 
 class PageHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        body = b'<title>Form</title><label for="name">Name</label><input id="name">'
+        body = (
+            b'<title>Form</title><label for="name">Name</label><input id="name">'
+            b'<label for="city">City</label><input id="city">'
+        )
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
@@ -36,7 +39,10 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
             calls += 1
             if calls == 1:
                 return ModelResponse(
-                    parts=[ToolCallPart("fill", {"element_id": 1, "value": "Ada"})]
+                    parts=[
+                        ToolCallPart("fill", {"element_id": 1, "value": "Ada"}),
+                        ToolCallPart("fill", {"element_id": 2, "value": "London"}),
+                    ]
                 )
             if calls == 2:
                 return ModelResponse(
@@ -80,6 +86,10 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "passed")
         self.assertEqual(result.summary, "Form verified")
         self.assertEqual(result.usage["requests"], 3)
+        self.assertEqual(result.diagnostics, ())
+        self.assertEqual(saved["diagnostics"], [])
+        self.assertNotIn("Ada", json.dumps(saved))
+        self.assertNotIn("London", json.dumps(saved))
         self.assertEqual(
             saved["evidence"], ["title_equals: expected='Form', actual='Form'"]
         )

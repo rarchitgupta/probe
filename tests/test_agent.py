@@ -13,12 +13,22 @@ from qa_agent.agent import (
     AgentTask,
     browser_agent,
     build_agent_prompt,
+    sanitize_summary,
 )
 from qa_agent.browser import BrowserSession, InteractiveElement, PageObservation
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
 
 class BrowserAgentTest(unittest.IsolatedAsyncioTestCase):
+    def test_sanitizes_known_password_values(self) -> None:
+        self.assertEqual(
+            sanitize_summary(
+                "Logged in with standard_user/secret_sauce",
+                {"secret_sauce"},
+            ),
+            "Logged in with standard_user/[REDACTED]",
+        )
+
     def test_builds_compact_prompt(self) -> None:
         prompt = build_agent_prompt(
             AgentTask(goal="Sign in", start_url="https://example.com/login"),
@@ -50,7 +60,11 @@ class BrowserAgentTest(unittest.IsolatedAsyncioTestCase):
                     "evidence": ["invented"],
                 }
                 if calls == 1
-                else {"status": "failed", "summary": "Not verified", "evidence": []}
+                else {
+                    "status": "failed",
+                    "summary": "Login with password secret_sauce was not verified",
+                    "evidence": [],
+                }
             )
             return ModelResponse(parts=[ToolCallPart(output_tool, outcome)])
 
@@ -70,6 +84,10 @@ class BrowserAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, 2)
         self.assertEqual(result.output.status, "failed")
+        self.assertEqual(
+            result.output.summary,
+            "Login with password [REDACTED] was not verified",
+        )
         self.assertEqual(result.output.evidence, [])
 
 
