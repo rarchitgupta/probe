@@ -181,7 +181,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                     goal="Fill the name and verify the form",
                     start_url=f"http://127.0.0.1:{server.server_port}",
                 )
-                with patch.dict("os.environ", {"QA_AGENT_DIAGNOSTICS": "false"}):
+                with patch.dict("os.environ", {"PROBE_DIAGNOSTICS": "false"}):
                     result = await execute_agent_task(
                         task,
                         model=FunctionModel(respond),

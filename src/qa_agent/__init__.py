@@ -1,1 +1,1 @@
-"""QA Agent browser execution package."""
+"""Probe browser execution package."""

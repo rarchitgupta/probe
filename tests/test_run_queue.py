@@ -41,7 +41,7 @@ class RunQueueServiceTest(unittest.IsolatedAsyncioTestCase):
             return passed_result(task)
 
         with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "qa-agent.db")
+            store = SQLiteRunStore(Path(directory) / "probe.db")
             service = RunQueueService(store, execute)
             await service.start()
             try:
@@ -72,7 +72,7 @@ class RunQueueServiceTest(unittest.IsolatedAsyncioTestCase):
             return passed_result(task)
 
         with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "qa-agent.db")
+            store = SQLiteRunStore(Path(directory) / "probe.db")
             service = RunQueueService(store, execute)
             await service.start()
             try:

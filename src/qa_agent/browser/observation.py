@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 MAX_INTERACTIVE_ELEMENTS = 100
-ELEMENT_REFERENCE_ATTRIBUTE = "data-qa-agent-ref"
+ELEMENT_REFERENCE_ATTRIBUTE = "data-probe-ref"
 INTERACTIVE_SELECTOR = ",".join(
     (
         "a",

@@ -21,7 +21,7 @@ from qa_agent.runs import RunQueueService, SQLiteRunStore
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qa-agent")
+    parser = argparse.ArgumentParser(prog="probe")
     commands = parser.add_subparsers(dest="command", required=True)
     inspect = commands.add_parser("inspect", help="Inspect a page in Chromium")
     inspect.add_argument("url")
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("goal")
     run.add_argument("--artifacts", type=Path, default=Path(".runs"))
     run.add_argument("--queued", action="store_true")
-    run.add_argument("--database", type=Path, default=Path(".qa-agent/qa-agent.db"))
+    run.add_argument("--database", type=Path, default=Path(".probe/probe.db"))
     run.add_argument("--json", action="store_true", dest="json_output")
     return parser
 

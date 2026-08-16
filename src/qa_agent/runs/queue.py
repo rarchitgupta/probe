@@ -30,7 +30,7 @@ class RunQueueService:
         self.store.initialize()
         for run in self.store.recover_pending():
             self._queue.put_nowait(run.id)
-        self._worker = asyncio.create_task(self._work(), name="qa-agent-worker")
+        self._worker = asyncio.create_task(self._work(), name="probe-worker")
 
     async def submit(self, task: AgentTask) -> TaskRun:
         if not self._worker:

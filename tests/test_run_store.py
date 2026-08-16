@@ -12,7 +12,7 @@ from qa_agent.runs import InvalidRunTransitionError, RunStatus, SQLiteRunStore
 class SQLiteRunStoreTest(unittest.TestCase):
     def test_initializes_and_persists_a_queued_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "data" / "qa-agent.db"
+            database = Path(directory) / "data" / "probe.db"
             store = SQLiteRunStore(database)
             store.initialize()
             store.initialize()
@@ -38,7 +38,7 @@ class SQLiteRunStoreTest(unittest.TestCase):
 
     def test_transitions_a_run_atomically_to_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "qa-agent.db")
+            store = SQLiteRunStore(Path(directory) / "probe.db")
             store.initialize()
             store.create(
                 AgentTask(
@@ -65,7 +65,7 @@ class SQLiteRunStoreTest(unittest.TestCase):
 
     def test_cancels_only_queued_runs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "qa-agent.db")
+            store = SQLiteRunStore(Path(directory) / "probe.db")
             store.initialize()
             store.create(
                 AgentTask(

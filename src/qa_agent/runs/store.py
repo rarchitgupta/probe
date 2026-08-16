@@ -10,7 +10,7 @@ from pathlib import Path
 
 from qa_agent.agent import AgentTask
 
-DEFAULT_DATABASE_PATH = Path(".qa-agent/qa-agent.db")
+DEFAULT_DATABASE_PATH = Path(".probe/probe.db")
 
 
 class RunStatus(StrEnum):

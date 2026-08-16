@@ -142,7 +142,9 @@ async def execute_agent_task(
     artifact_root: Path = Path(".runs"),
 ) -> AgentTaskResult:
     load_dotenv()
-    keep_diagnostics = os.getenv("QA_AGENT_DIAGNOSTICS", "").lower() in {
+    keep_diagnostics = os.getenv(
+        "PROBE_DIAGNOSTICS", os.getenv("QA_AGENT_DIAGNOSTICS", "")
+    ).lower() in {
         "1",
         "true",
         "yes",
