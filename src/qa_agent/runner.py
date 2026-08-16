@@ -203,6 +203,7 @@ async def execute_agent_task(
                         )
                         completed_steps = []
                         for step in spec_run.output.steps:
+                            deps.successful_actions.clear()
                             progress: list[ProgressEntry] = []
                             evidence_before = len(deps.evidence)
                             for _ in range(MAX_STEP_ROUNDS):

@@ -70,11 +70,14 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                 await session.navigate(f"data:text/html,{quote(html)}")
                 observation = await session.observe()
                 checkbox_id = observation.elements[0].id
+                self.assertFalse(observation.elements[0].checked)
+                self.assertEqual(observation.elements[1].selected_option, "Canada")
 
                 checked = await session.execute(
                     SetCheckedAction("set_checked", checkbox_id, True)
                 )
                 observation = await session.observe()
+                self.assertTrue(observation.elements[0].checked)
                 checked_assertion = await session.assert_checked(
                     observation.elements[0].id, True
                 )
@@ -85,6 +88,7 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                     )
                 )
                 observation = await session.observe()
+                self.assertEqual(observation.elements[1].selected_option, "Japan")
                 selected_assertion = await session.assert_selected_option(
                     observation.elements[1].id, "Japan"
                 )
@@ -136,6 +140,7 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
 
                 observation = await session.observe()
                 username_id = observation.elements[0].id
+                self.assertFalse(observation.elements[0].filled)
                 result = await session.execute(
                     FillAction(
                         action="fill", element_id=username_id, value="standard_user"
@@ -149,6 +154,7 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(stale_result.success)
 
                 observation = await session.observe()
+                self.assertTrue(observation.elements[0].filled)
                 password_id = observation.elements[1].id
                 result = await session.execute(
                     FillAction(action="fill", element_id=password_id, value="secret")

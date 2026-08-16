@@ -53,6 +53,47 @@ class CliTest(unittest.TestCase):
         self.assertIn("PASSED  task-1", output.getvalue())
         self.assertIn("4 requests · 5 tools · $0.000260", output.getvalue())
 
+    def test_runs_agent_through_queue(self) -> None:
+        result = AgentTaskResult(
+            task_id="task-2",
+            status="passed",
+            start_url="https://example.com/",
+            final_url="https://example.com/done",
+            http_status=200,
+            summary="Queued run passed",
+            evidence=(),
+            diagnostics=(),
+            usage={},
+            error=None,
+            artifact_directory="artifacts/task-2",
+        )
+
+        with (
+            patch(
+                "qa_agent.cli.execute_queued_task",
+                new=AsyncMock(return_value=result),
+            ) as execute,
+            redirect_stdout(io.StringIO()),
+            self.assertRaises(SystemExit) as exit_code,
+        ):
+            main(
+                [
+                    "run",
+                    "https://example.com/",
+                    "Verify checkout",
+                    "--queued",
+                    "--database",
+                    "runs.db",
+                    "--artifacts",
+                    "artifacts",
+                ]
+            )
+
+        self.assertEqual(
+            execute.call_args.args[1:], (Path("runs.db"), Path("artifacts"))
+        )
+        self.assertEqual(exit_code.exception.code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

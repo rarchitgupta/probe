@@ -61,6 +61,7 @@ class AgentDeps:
         default_factory=dict
     )
     sensitive_values: set[str] = field(default_factory=set)
+    successful_actions: set[tuple[object, ...]] = field(default_factory=set)
 
 
 async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolResult:
@@ -82,6 +83,8 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
             return ToolResult(success=False, error="Radio buttons cannot be unchecked")
         targets.append((target, form_field.value))
 
+    result = ToolResult(success=True)
+    executed = False
     for target, value in targets:
         matches = [
             element
@@ -95,6 +98,22 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
                 error=f"Field {target.name!r} is no longer uniquely available",
             )
         element_id = matches[0].id
+        action_name = (
+            "set_checked"
+            if isinstance(value, bool)
+            else "select_option"
+            if target.role == "combobox"
+            else "fill"
+        )
+        action_key = (
+            action_name,
+            target.role,
+            target.name,
+            target.input_type,
+            value,
+        )
+        if action_key in deps.successful_actions:
+            continue
         if isinstance(value, bool):
             result = await _execute(
                 deps, SetCheckedAction("set_checked", element_id, value)
@@ -107,7 +126,16 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
             result = await _execute(deps, FillAction("fill", element_id, value))
         if not result.success:
             return result
-    return result
+        executed = True
+        deps.successful_actions.add(action_key)
+    return (
+        result
+        if executed
+        else ToolResult(
+            success=False,
+            error="These fields were already completed; choose another action or finish the step",
+        )
+    )
 
 
 async def _execute(
@@ -196,7 +224,27 @@ async def execute_instructions(
         if isinstance(instruction, ClickInstruction):
             element = deps.elements.get(instruction.element_id)
             target = element.name if element else f"element {instruction.element_id}"
-            result = await _execute(deps, ClickAction("click", instruction.element_id))
+            action = (
+                SetCheckedAction("set_checked", instruction.element_id, True)
+                if element and element.role in {"checkbox", "radio"}
+                else ClickAction("click", instruction.element_id)
+            )
+            action_key = (
+                action.action,
+                element.role if element else None,
+                element.name if element else instruction.element_id,
+                element.input_type if element else None,
+                True if isinstance(action, SetCheckedAction) else None,
+            )
+            if action_key in deps.successful_actions:
+                result = ToolResult(
+                    success=False,
+                    error="This action was already completed; choose another action or finish the step",
+                )
+            else:
+                result = await _execute(deps, action)
+                if result.success:
+                    deps.successful_actions.add(action_key)
         elif isinstance(instruction, FillFormInstruction):
             names = [
                 deps.elements[form_field.element_id].name

@@ -140,17 +140,27 @@ OBSERVE_INTERACTIVE_ELEMENTS = r"""
 
         const id = observations.length + 1;
         const reference = `${referencePrefix}:${id}`;
+        const role = inferredRole(element);
         element.setAttribute(referenceAttribute, reference);
         observations.push({
             reference,
             id,
-            role: inferredRole(element),
+            role,
             name: accessibleName(element),
             tag: element.tagName.toLowerCase(),
             input_type: element.tagName === 'INPUT' ? element.type : null,
             disabled: Boolean(
                 element.disabled || element.getAttribute('aria-disabled') === 'true',
             ),
+            checked: ['checkbox', 'radio'].includes(role)
+                ? Boolean(element.checked ?? element.getAttribute('aria-checked') === 'true')
+                : null,
+            selected_option: element.tagName === 'SELECT'
+                ? normalize(element.selectedOptions?.[0]?.textContent)
+                : null,
+            filled: role === 'textbox' || role === 'spinbutton'
+                ? Boolean(normalize(element.value ?? element.textContent))
+                : null,
         });
     }
     const scrollingElement = document.scrollingElement;
@@ -173,6 +183,9 @@ class InteractiveElement:
     tag: str
     input_type: str | None
     disabled: bool
+    checked: bool | None = None
+    selected_option: str | None = None
+    filled: bool | None = None
 
 
 @dataclass(frozen=True)
