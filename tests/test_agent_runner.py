@@ -6,8 +6,11 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
-from pydantic_ai import ModelResponse, ToolCallPart
+import httpx2
+from openai import APITimeoutError
+from pydantic_ai import ModelAPIError, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from qa_agent.agent import AgentTask
@@ -31,6 +34,77 @@ class PageHandler(BaseHTTPRequestHandler):
 
 
 class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_preserves_diagnostics_when_model_times_out(self) -> None:
+        calls = 0
+
+        async def respond(messages: list, info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            info.output_tools[0].name,
+                            {
+                                "steps": [
+                                    {
+                                        "id": 1,
+                                        "kind": "action",
+                                        "instruction": "Fill the name",
+                                    },
+                                    {
+                                        "id": 2,
+                                        "kind": "assertion",
+                                        "instruction": "Verify the title",
+                                    },
+                                ]
+                            },
+                        )
+                    ]
+                )
+            if calls == 2:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            info.output_tools[0].name,
+                            {
+                                "actions": [
+                                    {
+                                        "action": "fill_form",
+                                        "fields": [{"element_id": 1, "value": "Ada"}],
+                                    }
+                                ],
+                                "step_complete": True,
+                            },
+                        )
+                    ]
+                )
+            timeout = APITimeoutError(request=httpx2.Request("POST", "https://model"))
+            raise ModelAPIError("deepseek-v4-flash", timeout.message) from timeout
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), PageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                result = await execute_agent_task(
+                    AgentTask(
+                        task_id="timed-out-run",
+                        goal="Fill the form",
+                        start_url=f"http://127.0.0.1:{server.server_port}",
+                    ),
+                    model=FunctionModel(respond),
+                    artifact_root=Path(directory),
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+        self.assertEqual(result.error, "Model request timed out after 60 seconds")
+        self.assertEqual(len(result.diagnostics), 1)
+        self.assertEqual(result.diagnostics[0].action, "fill")
+
     async def test_runs_agent_and_writes_artifacts(self) -> None:
         calls = 0
 
@@ -40,19 +114,58 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
             if calls == 1:
                 return ModelResponse(
                     parts=[
-                        ToolCallPart("fill", {"element_id": 1, "value": "Ada"}),
-                        ToolCallPart("fill", {"element_id": 2, "value": "London"}),
+                        ToolCallPart(
+                            info.output_tools[0].name,
+                            {
+                                "steps": [
+                                    {
+                                        "id": 1,
+                                        "kind": "action",
+                                        "instruction": "Fill the form",
+                                    },
+                                    {
+                                        "id": 2,
+                                        "kind": "assertion",
+                                        "instruction": "Verify the title",
+                                    },
+                                ]
+                            },
+                        )
                     ]
                 )
             if calls == 2:
                 return ModelResponse(
-                    parts=[ToolCallPart("assert_title_equals", {"title": "Form"})]
+                    parts=[
+                        ToolCallPart(
+                            info.output_tools[0].name,
+                            {
+                                "actions": [
+                                    {
+                                        "action": "fill_form",
+                                        "fields": [
+                                            {"element_id": 1, "value": "Ada"},
+                                            {"element_id": 2, "value": "London"},
+                                        ],
+                                    },
+                                ],
+                                "step_complete": True,
+                            },
+                        )
+                    ]
                 )
             return ModelResponse(
                 parts=[
                     ToolCallPart(
                         info.output_tools[0].name,
-                        {"status": "passed", "summary": "Form verified"},
+                        {
+                            "actions": [
+                                {
+                                    "action": "assert_title_equals",
+                                    "expected": "Form",
+                                }
+                            ],
+                            "step_complete": False,
+                        },
                     )
                 ]
             )
@@ -68,11 +181,12 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                     goal="Fill the name and verify the form",
                     start_url=f"http://127.0.0.1:{server.server_port}",
                 )
-                result = await execute_agent_task(
-                    task,
-                    model=FunctionModel(respond),
-                    artifact_root=root,
-                )
+                with patch.dict("os.environ", {"QA_AGENT_DIAGNOSTICS": "false"}):
+                    result = await execute_agent_task(
+                        task,
+                        model=FunctionModel(respond),
+                        artifact_root=root,
+                    )
                 saved = json.loads((root / task.task_id / "result.json").read_text())
 
                 self.assertIsNone(result.error)
@@ -84,7 +198,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
             thread.join()
 
         self.assertEqual(result.status, "passed")
-        self.assertEqual(result.summary, "Form verified")
+        self.assertEqual(result.summary, "Completed all 2 test steps")
         self.assertEqual(result.usage["requests"], 3)
         self.assertEqual(result.diagnostics, ())
         self.assertEqual(saved["diagnostics"], [])

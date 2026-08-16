@@ -11,20 +11,29 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from langfuse import propagate_attributes
-from pydantic_ai import UsageLimits
+from openai import APITimeoutError
+from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
 from pydantic_ai.models import Model
 
 from qa_agent.agent import (
     ActionDiagnostic,
     AgentDeps,
     AgentTask,
-    browser_agent,
-    build_agent_prompt,
+    ProgressEntry,
+    build_step_prompt,
+    execute_instructions,
     page_state,
+    sanitize_summary,
+    spec_agent,
+    step_agent,
 )
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser import BrowserSession, InteractiveElement
-from qa_agent.llm import DEEPSEEK_SETTINGS, deepseek_model
+from qa_agent.llm import (
+    DEEPSEEK_SETTINGS,
+    MODEL_REQUEST_TIMEOUT_SECONDS,
+    deepseek_model,
+)
 from qa_agent.observability import configure_observability
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
@@ -35,6 +44,8 @@ AGENT_USAGE_LIMITS = UsageLimits(
     tool_calls_limit=15,
     total_tokens_limit=30_000,
 )
+AGENT_EXECUTION_POLICY = ExecutionPolicy(timeout_seconds=150)
+MAX_STEP_ROUNDS = 6
 
 
 @dataclass(frozen=True)
@@ -126,7 +137,7 @@ async def execute_agent_task(
     task: AgentTask,
     *,
     model: Model | None = None,
-    policy: ExecutionPolicy = ExecutionPolicy(),
+    policy: ExecutionPolicy = AGENT_EXECUTION_POLICY,
     usage_limits: UsageLimits = AGENT_USAGE_LIMITS,
     artifact_root: Path = Path(".runs"),
 ) -> AgentTaskResult:
@@ -147,6 +158,8 @@ async def execute_agent_task(
     diagnostics: tuple[ActionDiagnostic, ...] = ()
     usage: dict[str, object] = {}
     error: str | None = None
+    deps: AgentDeps | None = None
+    run_usage = RunUsage()
 
     try:
         async with asyncio.timeout(guard.remaining_seconds):
@@ -180,35 +193,127 @@ async def execute_agent_task(
                         if langfuse
                         else nullcontext()
                     )
-                    with (
-                        trace_context,
-                        browser_agent.parallel_tool_call_execution_mode("sequential"),
-                    ):
-                        run = await browser_agent.run(
-                            build_agent_prompt(task, observation),
-                            deps=deps,
+                    with trace_context:
+                        spec_run = await spec_agent.run(
+                            task.goal,
                             model=selected_model,
                             model_settings=None if model else DEEPSEEK_SETTINGS,
                             usage_limits=usage_limits,
+                            usage=run_usage,
                         )
-                    status = run.output.status
-                    summary = run.output.summary
-                    evidence = tuple(run.output.evidence)
+                        completed_steps = []
+                        for step in spec_run.output.steps:
+                            progress: list[ProgressEntry] = []
+                            evidence_before = len(deps.evidence)
+                            for _ in range(MAX_STEP_ROUNDS):
+                                observation = await browser.observe()
+                                state = page_state(observation)
+                                deps.elements = {
+                                    element.id: element for element in state.elements
+                                }
+                                decision_run = await step_agent.run(
+                                    build_step_prompt(
+                                        step,
+                                        completed_steps,
+                                        progress,
+                                        observation,
+                                    ),
+                                    model=selected_model,
+                                    model_settings=None if model else DEEPSEEK_SETTINGS,
+                                    usage_limits=usage_limits,
+                                    usage=run_usage,
+                                )
+                                decision = decision_run.output
+                                if decision.failure:
+                                    status = "blocked" if decision.blocked else "failed"
+                                    summary = sanitize_summary(
+                                        decision.failure, deps.sensitive_values
+                                    )
+                                    break
+
+                                batch_progress, executed = await execute_instructions(
+                                    deps, decision.actions
+                                )
+                                progress.extend(batch_progress)
+                                batch_succeeded = all(
+                                    entry.success for entry in batch_progress
+                                )
+                                batch_finished = executed == len(decision.actions)
+                                assertion_proved = (
+                                    step.kind != "assertion"
+                                    or len(deps.evidence) > evidence_before
+                                )
+                                action_proved = step.kind != "action" or any(
+                                    entry.success for entry in progress
+                                )
+                                assertion_batch_completed = (
+                                    step.kind == "assertion"
+                                    and bool(batch_progress)
+                                    and batch_finished
+                                    and batch_succeeded
+                                    and all(
+                                        entry.effect == "asserted"
+                                        for entry in batch_progress
+                                    )
+                                )
+                                if (
+                                    (
+                                        decision.step_complete
+                                        or assertion_batch_completed
+                                    )
+                                    and batch_succeeded
+                                    and batch_finished
+                                    and assertion_proved
+                                    and action_proved
+                                ):
+                                    completed_steps.append(step)
+                                    break
+                                if decision.step_complete and not assertion_proved:
+                                    progress.append(
+                                        ProgressEntry(
+                                            action="assertion_required",
+                                            success=False,
+                                            error="Run a successful assertion for this step",
+                                        )
+                                    )
+                            else:
+                                status = "failed"
+                                summary = f"Step {step.id} exceeded its execution limit"
+
+                            if status in {"failed", "blocked"}:
+                                break
+                        else:
+                            status = "passed"
+                            summary = f"Completed all {len(completed_steps)} test steps"
+
+                        evidence = tuple(deps.evidence)
                     diagnostics = tuple(deps.diagnostics)
-                    usage = asdict(run.usage)
-                    if usage.get("cost") is not None:
-                        usage["cost"] = str(usage["cost"])
                 finally:
                     final_url = browser.page.url if browser.page else final_url
                     try:
                         await browser.screenshot(artifacts.screenshot)
                     except Exception:
                         pass
+    except APITimeoutError:
+        error = (
+            f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
+        )
+    except ModelAPIError as exc:
+        error = (
+            f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
+            if isinstance(exc.__cause__, APITimeoutError)
+            else f"{type(exc).__name__}: {exc}"
+        )
     except TimeoutError:
         error = f"Execution timed out after {policy.timeout_seconds:g} seconds"
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
 
+    if deps:
+        diagnostics = tuple(deps.diagnostics)
+    usage = asdict(run_usage)
+    if usage.get("cost") is not None:
+        usage["cost"] = str(usage["cost"])
     if status == "passed" and not keep_diagnostics:
         diagnostics = ()
 

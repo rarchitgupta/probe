@@ -1,18 +1,37 @@
+import os
+
+from openai import AsyncOpenAI
 from pydantic_ai.models.openai import (
-    OpenAIResponsesModel,
-    OpenAIResponsesModelSettings,
+    OpenAIChatModel,
+    OpenAIChatModelSettings,
 )
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
-DEEPSEEK_SETTINGS = OpenAIResponsesModelSettings(
+MODEL_REQUEST_TIMEOUT_SECONDS = 60
+
+DEEPSEEK_SETTINGS = OpenAIChatModelSettings(
+    max_tokens=1024,
     temperature=0,
     thinking=False,
-    timeout=30,
+    timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
 )
 
 
-def deepseek_model() -> OpenAIResponsesModel:
-    return OpenAIResponsesModel(
+def deepseek_model() -> OpenAIChatModel:
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    provider = DeepSeekProvider(api_key=api_key)
+    return OpenAIChatModel(
         "deepseek-v4-flash",
-        provider=DeepSeekProvider(),
+        profile=OpenAIModelProfile(
+            openai_chat_supports_max_completion_tokens=False,
+        ),
+        provider=DeepSeekProvider(
+            openai_client=AsyncOpenAI(
+                api_key=api_key,
+                base_url=provider.base_url,
+                max_retries=1,
+                timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            )
+        ),
     )

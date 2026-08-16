@@ -27,21 +27,50 @@ class TextVisibleAssertion:
     exact: bool = False
 
 
-BrowserAssertion = UrlContainsAssertion | TitleEqualsAssertion | TextVisibleAssertion
+@dataclass(frozen=True)
+class CheckedAssertion:
+    assertion: Literal["checked"]
+    element_id: int
+    expected: bool
+
+
+@dataclass(frozen=True)
+class SelectedOptionAssertion:
+    assertion: Literal["selected_option"]
+    element_id: int
+    expected: str
+
+
+@dataclass(frozen=True)
+class DialogMessageAssertion:
+    assertion: Literal["dialog_message"]
+    expected: str
+
+
+PageAssertion = UrlContainsAssertion | TitleEqualsAssertion | TextVisibleAssertion
+ElementAssertion = CheckedAssertion | SelectedOptionAssertion
+BrowserAssertion = PageAssertion | ElementAssertion | DialogMessageAssertion
 
 
 @dataclass(frozen=True)
 class AssertionResult:
-    assertion: Literal["url_contains", "title_equals", "text_visible"]
+    assertion: Literal[
+        "url_contains",
+        "title_equals",
+        "text_visible",
+        "checked",
+        "selected_option",
+        "dialog_message",
+    ]
     success: bool
-    expected: str
-    actual: str | None
+    expected: str | bool
+    actual: str | bool | None
     error: str | None = None
 
 
 async def evaluate_assertion(
     page: Page,
-    assertion: BrowserAssertion,
+    assertion: PageAssertion,
     *,
     timeout_ms: float = 5_000,
 ) -> AssertionResult:
@@ -84,7 +113,7 @@ async def evaluate_assertion(
         )
 
 
-async def _current_value(page: Page, assertion: BrowserAssertion) -> str | None:
+async def _current_value(page: Page, assertion: PageAssertion) -> str | None:
     if isinstance(assertion, UrlContainsAssertion):
         return page.url
     if isinstance(assertion, TitleEqualsAssertion):

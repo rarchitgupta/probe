@@ -23,6 +23,7 @@ class BrowserObservationTest(unittest.IsolatedAsyncioTestCase):
             <button id="offscreen">Offscreen</button>
             <button id="covered">Covered</button><div id="cover"></div>
             <a href="/cart"><img alt="Shopping cart"></a>
+            <a onclick="void 0">JavaScript link</a>
         """
         with tempfile.TemporaryDirectory() as directory:
             async with BrowserSession(
@@ -33,7 +34,11 @@ class BrowserObservationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [(element.role, element.name) for element in observation.elements],
-            [("button", "Visible"), ("link", "Shopping cart")],
+            [
+                ("button", "Visible"),
+                ("link", "Shopping cart"),
+                ("link", "JavaScript link"),
+            ],
         )
 
 

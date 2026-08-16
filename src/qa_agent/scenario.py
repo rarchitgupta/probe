@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from qa_agent.artifacts import ArtifactPaths
-from qa_agent.assertions import BrowserAssertion
+from qa_agent.assertions import PageAssertion
 from qa_agent.browser import (
     BrowserSession,
     ClickAction,
@@ -37,7 +37,7 @@ class FillStep:
     value: str
 
 
-ScenarioStep = ClickStep | FillStep | BrowserAssertion
+ScenarioStep = ClickStep | FillStep | PageAssertion
 
 
 @dataclass(frozen=True)
@@ -192,7 +192,11 @@ async def _execute_step(
         index=index,
         operation=assertion_result.assertion,
         success=assertion_result.success,
-        expected=assertion_result.expected,
-        actual=assertion_result.actual,
+        expected=str(assertion_result.expected),
+        actual=(
+            str(assertion_result.actual)
+            if assertion_result.actual is not None
+            else None
+        ),
         error=assertion_result.error,
     )
