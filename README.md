@@ -18,6 +18,7 @@ The current implementation includes:
 uv sync
 uv run playwright install chromium
 cp .env.example .env
+uv run alembic upgrade head
 ```
 
 Add your `DEEPSEEK_API_KEY` to `.env`. Langfuse configuration is optional.
