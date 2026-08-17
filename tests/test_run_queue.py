@@ -5,9 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from qa_agent.agent import AgentTask
+from qa_agent.database import Base
 from qa_agent.runner import AgentTaskResult
-from qa_agent.runs import RunQueueService, RunStatus, SQLiteRunStore, TaskRun
+from qa_agent.runs import RunQueueService, RunStatus, RunStore, TaskRun
 
 
 def passed_result(task: AgentTask) -> AgentTaskResult:
@@ -27,6 +30,18 @@ def passed_result(task: AgentTask) -> AgentTaskResult:
 
 
 class RunQueueServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        path = Path(self.directory.name) / "probe.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+        async with self.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        self.store = RunStore(async_sessionmaker(self.engine, expire_on_commit=False))
+
+    async def asyncTearDown(self) -> None:
+        await self.engine.dispose()
+        self.directory.cleanup()
+
     async def test_accepts_a_second_run_while_processing_the_first(self) -> None:
         first_started = asyncio.Event()
         release_first = asyncio.Event()
@@ -40,30 +55,28 @@ class RunQueueServiceTest(unittest.IsolatedAsyncioTestCase):
             order.append(f"finish:{task.task_id}")
             return passed_result(task)
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "probe.db")
-            service = RunQueueService(store, execute)
-            await service.start()
-            try:
-                await service.submit(_task("run-1"))
-                await first_started.wait()
-                second = await service.submit(_task("run-2"))
+        service = RunQueueService(self.store, execute)
+        await service.start()
+        try:
+            await service.submit(_task("run-1"))
+            await first_started.wait()
+            second = await service.submit(_task("run-2"))
 
-                self.assertEqual(_run(service, "run-1").status, RunStatus.RUNNING)
-                self.assertEqual(second.status, RunStatus.QUEUED)
+            self.assertEqual((await _run(service, "run-1")).status, RunStatus.RUNNING)
+            self.assertEqual(second.status, RunStatus.QUEUED)
 
-                release_first.set()
-                await service.join()
+            release_first.set()
+            await service.join()
 
-                self.assertEqual(_run(service, "run-1").status, RunStatus.PASSED)
-                self.assertEqual(_run(service, "run-2").status, RunStatus.PASSED)
-                self.assertEqual(
-                    order,
-                    ["start:run-1", "finish:run-1", "start:run-2", "finish:run-2"],
-                )
-            finally:
-                release_first.set()
-                await service.close()
+            self.assertEqual((await _run(service, "run-1")).status, RunStatus.PASSED)
+            self.assertEqual((await _run(service, "run-2")).status, RunStatus.PASSED)
+            self.assertEqual(
+                order,
+                ["start:run-1", "finish:run-1", "start:run-2", "finish:run-2"],
+            )
+        finally:
+            release_first.set()
+            await service.close()
 
     async def test_records_executor_errors_and_continues(self) -> None:
         async def execute(task: AgentTask) -> AgentTaskResult:
@@ -71,21 +84,19 @@ class RunQueueServiceTest(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("browser crashed")
             return passed_result(task)
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "probe.db")
-            service = RunQueueService(store, execute)
-            await service.start()
-            try:
-                await service.submit(_task("run-1"))
-                await service.submit(_task("run-2"))
-                await service.join()
+        service = RunQueueService(self.store, execute)
+        await service.start()
+        try:
+            await service.submit(_task("run-1"))
+            await service.submit(_task("run-2"))
+            await service.join()
 
-                failed = _run(service, "run-1")
-                self.assertEqual(failed.status, RunStatus.ERROR)
-                self.assertEqual(failed.error, "RuntimeError: browser crashed")
-                self.assertEqual(_run(service, "run-2").status, RunStatus.PASSED)
-            finally:
-                await service.close()
+            failed = await _run(service, "run-1")
+            self.assertEqual(failed.status, RunStatus.ERROR)
+            self.assertEqual(failed.error, "RuntimeError: browser crashed")
+            self.assertEqual((await _run(service, "run-2")).status, RunStatus.PASSED)
+        finally:
+            await service.close()
 
 
 def _task(task_id: str) -> AgentTask:
@@ -96,8 +107,8 @@ def _task(task_id: str) -> AgentTask:
     )
 
 
-def _run(service: RunQueueService, run_id: str) -> TaskRun:
-    run = service.get(run_id)
+async def _run(service: RunQueueService, run_id: str) -> TaskRun:
+    run = await service.get(run_id)
     assert run is not None
     return run
 

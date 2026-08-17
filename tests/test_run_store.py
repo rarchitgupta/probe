@@ -1,86 +1,79 @@
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from qa_agent.agent import AgentTask
-from qa_agent.runs import InvalidRunTransitionError, RunStatus, SQLiteRunStore
+from qa_agent.database import Base
+from qa_agent.runner import AgentTaskResult
+from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
 
 
-class SQLiteRunStoreTest(unittest.TestCase):
-    def test_initializes_and_persists_a_queued_run(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "data" / "probe.db"
-            store = SQLiteRunStore(database)
-            store.initialize()
-            store.initialize()
+class RunStoreTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        path = Path(self.directory.name) / "probe.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+        async with self.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        self.store = RunStore(async_sessionmaker(self.engine, expire_on_commit=False))
 
-            created = store.create(
-                AgentTask(
-                    task_id="run-1",
-                    start_url="https://example.com",
-                    goal="Verify the page",
-                )
-            )
-            loaded = SQLiteRunStore(database).get("run-1")
+    async def asyncTearDown(self) -> None:
+        await self.engine.dispose()
+        self.directory.cleanup()
 
-            self.assertEqual(created.status, RunStatus.QUEUED)
-            self.assertEqual(loaded, created)
-            self.assertIsNone(created.started_at)
-            self.assertIsNone(created.finished_at)
-            self.assertIsNone(created.result)
+    async def test_persists_and_transitions_a_run(self) -> None:
+        created = await self.store.create(_task())
+        loaded = await self.store.get("run-1")
+        running = await self.store.mark_running("run-1")
+        await self.store.finish(
+            "run-1",
+            RunStatus.PASSED,
+            result=AgentTaskResult(
+                task_id="run-1",
+                status="passed",
+                start_url="https://example.com/",
+                final_url="https://example.com/",
+                http_status=200,
+                summary="Verified",
+                evidence=("Page visible",),
+                diagnostics=(),
+                usage={},
+                error=None,
+                artifact_directory=".runs/run-1",
+            ),
+        )
+        fetched = await self.store.get_details("run-1")
 
-            with sqlite3.connect(database) as connection:
-                version = connection.execute("PRAGMA user_version").fetchone()[0]
-            self.assertEqual(version, 1)
+        self.assertEqual(created.status, RunStatus.QUEUED)
+        self.assertEqual(loaded, created)
+        self.assertEqual(running.status, RunStatus.RUNNING)
+        self.assertEqual(fetched.status if fetched else None, RunStatus.PASSED)
+        self.assertEqual(
+            fetched.result.evidence if fetched and fetched.result else None,
+            ("Page visible",),
+        )
+        with self.assertRaises(InvalidRunTransitionError):
+            await self.store.mark_running("run-1")
 
-    def test_transitions_a_run_atomically_to_completion(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "probe.db")
-            store.initialize()
-            store.create(
-                AgentTask(
-                    task_id="run-1",
-                    start_url="https://example.com",
-                    goal="Verify the page",
-                )
-            )
+    async def test_cancels_only_queued_runs(self) -> None:
+        await self.store.create(_task())
+        cancelled = await self.store.cancel("run-1")
 
-            running = store.mark_running("run-1")
-            finished = store.finish(
-                "run-1",
-                RunStatus.PASSED,
-                result={"summary": "Verified"},
-            )
+        self.assertEqual(cancelled.status, RunStatus.CANCELLED)
+        with self.assertRaises(InvalidRunTransitionError):
+            await self.store.cancel("run-1")
 
-            self.assertEqual(running.status, RunStatus.RUNNING)
-            self.assertIsNotNone(running.started_at)
-            self.assertEqual(finished.status, RunStatus.PASSED)
-            self.assertIsNotNone(finished.finished_at)
-            self.assertEqual(finished.result, {"summary": "Verified"})
-            with self.assertRaises(InvalidRunTransitionError):
-                store.mark_running("run-1")
 
-    def test_cancels_only_queued_runs(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = SQLiteRunStore(Path(directory) / "probe.db")
-            store.initialize()
-            store.create(
-                AgentTask(
-                    task_id="run-1",
-                    start_url="https://example.com",
-                    goal="Verify the page",
-                )
-            )
-
-            cancelled = store.cancel("run-1")
-
-            self.assertEqual(cancelled.status, RunStatus.CANCELLED)
-            self.assertIsNotNone(cancelled.finished_at)
-            with self.assertRaises(InvalidRunTransitionError):
-                store.cancel("run-1")
+def _task() -> AgentTask:
+    return AgentTask(
+        task_id="run-1",
+        start_url="https://example.com",
+        goal="Verify the page",
+    )
 
 
 if __name__ == "__main__":

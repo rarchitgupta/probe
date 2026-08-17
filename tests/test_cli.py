@@ -82,16 +82,12 @@ class CliTest(unittest.TestCase):
                     "https://example.com/",
                     "Verify checkout",
                     "--queued",
-                    "--database",
-                    "runs.db",
                     "--artifacts",
                     "artifacts",
                 ]
             )
 
-        self.assertEqual(
-            execute.call_args.args[1:], (Path("runs.db"), Path("artifacts"))
-        )
+        self.assertEqual(execute.call_args.args[1:], (Path("artifacts"),))
         self.assertEqual(exit_code.exception.code, 0)
 
 
