@@ -30,7 +30,9 @@ class UTCDateTime(TypeDecorator[datetime]):
     impl = DateTime(timezone=True)
     cache_ok = True
 
-    def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
+    def process_bind_param(
+        self, value: datetime | None, dialect: object
+    ) -> datetime | None:
         return value.astimezone(UTC) if value else None
 
     def process_result_value(
@@ -122,9 +124,7 @@ class RunEventRecord(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="CASCADE")
-    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"))
     kind: Mapped[RunEventKind] = mapped_column(run_event_kind_type)
     created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)
 

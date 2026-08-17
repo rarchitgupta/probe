@@ -114,7 +114,9 @@ class RunStore:
                 session, run_id, RunStatus.RUNNING, status, values
             )
             session.add(
-                _status_event(run_id, status, (result.summary if result else None) or error)
+                _status_event(
+                    run_id, status, (result.summary if result else None) or error
+                )
             )
             session.add_all(
                 RunEventRecord(
