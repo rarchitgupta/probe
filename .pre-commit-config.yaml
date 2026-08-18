@@ -1,0 +1,46 @@
+repos:
+  - repo: local
+    hooks:
+      - id: backend-lint
+        name: Backend lint
+        entry: uv run ruff check .
+        language: system
+        pass_filenames: false
+
+      - id: backend-format
+        name: Backend formatting
+        entry: uv run ruff format --check .
+        language: system
+        pass_filenames: false
+
+      - id: backend-types
+        name: Backend type check
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+
+      - id: frontend-lint
+        name: Frontend lint
+        entry: bun run --cwd client lint
+        language: system
+        pass_filenames: false
+
+      - id: frontend-types
+        name: Frontend type check
+        entry: bun run --cwd client typecheck
+        language: system
+        pass_filenames: false
+
+      - id: backend-build
+        name: Backend build
+        entry: uv build
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: frontend-build
+        name: Frontend build
+        entry: bun run --cwd client build
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
