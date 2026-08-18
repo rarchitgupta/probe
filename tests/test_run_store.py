@@ -67,10 +67,21 @@ class RunStoreTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(InvalidRunTransitionError):
             await self.store.cancel("run-1")
 
+    async def test_lists_newest_runs_with_status_filter(self) -> None:
+        await self.store.create(_task("run-1"))
+        await self.store.create(_task("run-2"))
+        await self.store.mark_running("run-2")
 
-def _task() -> AgentTask:
+        all_runs = await self.store.list_runs()
+        running = await self.store.list_runs(status=RunStatus.RUNNING)
+
+        self.assertEqual([run.id for run in all_runs], ["run-2", "run-1"])
+        self.assertEqual([run.id for run in running], ["run-2"])
+
+
+def _task(task_id: str = "run-1") -> AgentTask:
     return AgentTask(
-        task_id="run-1",
+        task_id=task_id,
         start_url="https://example.com",
         goal="Verify the page",
     )

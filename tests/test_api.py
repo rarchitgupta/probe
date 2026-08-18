@@ -27,6 +27,37 @@ class ApiLifespanTest(unittest.IsolatedAsyncioTestCase):
 
 
 class CreateRunTest(unittest.TestCase):
+    def test_allows_cors_from_local_frontend(self) -> None:
+        queue = Mock(spec=RunQueueService)
+        queue.start = AsyncMock()
+        queue.close = AsyncMock()
+
+        with (
+            patch("qa_agent.api.RunQueueService", return_value=queue),
+            TestClient(app) as client,
+        ):
+            allowed = client.options(
+                "/runs",
+                headers={
+                    "Origin": "http://localhost:3000",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            denied = client.options(
+                "/runs",
+                headers={
+                    "Origin": "http://localhost:3001",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(
+            allowed.headers["access-control-allow-origin"], "http://localhost:3000"
+        )
+        self.assertNotIn("access-control-allow-origin", denied.headers)
+
     def test_accepts_and_queues_a_run(self) -> None:
         submitted: list[AgentTask] = []
         run = TaskRun(
@@ -45,6 +76,7 @@ class CreateRunTest(unittest.TestCase):
         queue.start = AsyncMock()
         queue.close = AsyncMock()
         queue.submit = AsyncMock(side_effect=submit)
+        queue.list_runs = AsyncMock(return_value=[run])
         queue.get_details = AsyncMock(
             side_effect=lambda run_id: run if run_id == run.id else None
         )
@@ -61,6 +93,8 @@ class CreateRunTest(unittest.TestCase):
                 },
             )
             invalid = client.post("/runs", json={"start_url": "not-a-url", "goal": ""})
+            listed = client.get("/runs?status=queued&limit=10&offset=0")
+            invalid_filter = client.get("/runs?status=unknown")
             fetched = client.get("/runs/run-1")
             missing = client.get("/runs/missing")
 
@@ -68,6 +102,13 @@ class CreateRunTest(unittest.TestCase):
         self.assertEqual(response.json(), {"id": "run-1", "status": "queued"})
         self.assertEqual(response.headers["location"], "/runs/run-1")
         self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["id"], "run-1")
+        self.assertNotIn("result", listed.json()[0])
+        self.assertEqual(invalid_filter.status_code, 422)
+        queue.list_runs.assert_awaited_once_with(
+            status=RunStatus.QUEUED, limit=10, offset=0
+        )
         self.assertEqual(fetched.status_code, 200)
         self.assertEqual(fetched.json()["id"], "run-1")
         self.assertEqual(fetched.json()["status"], "queued")

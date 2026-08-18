@@ -43,6 +43,15 @@ class RunQueueService:
     async def get_details(self, run_id: str) -> TaskRun | None:
         return await self.store.get_details(run_id)
 
+    async def list_runs(
+        self,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        return await self.store.list_runs(status=status, limit=limit, offset=offset)
+
     async def join(self) -> None:
         await self._queue.join()
 

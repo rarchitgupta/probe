@@ -62,6 +62,25 @@ class RunStore:
             record = await session.get(TaskRunRecord, run_id)
             return _task_run(record) if record else None
 
+    async def list_runs(
+        self,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        query = select(TaskRunRecord)
+        if status is not None:
+            query = query.where(TaskRunRecord.status == status)
+        query = (
+            query.order_by(TaskRunRecord.created_at.desc(), TaskRunRecord.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        async with self.sessions() as session:
+            records = (await session.scalars(query)).all()
+        return [_task_run(record) for record in records]
+
     async def get_details(self, run_id: str) -> TaskRun | None:
         async with self.sessions() as session:
             record = await session.get(TaskRunRecord, run_id)
