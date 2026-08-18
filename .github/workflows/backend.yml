@@ -1,4 +1,4 @@
-name: CI
+name: Backend
 
 on:
   push:
@@ -36,6 +36,9 @@ jobs:
 
       - name: Type check
         run: uv run ty check
+
+      - name: Build
+        run: uv build
 
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium

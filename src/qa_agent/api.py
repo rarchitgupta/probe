@@ -4,7 +4,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from qa_agent.agent import AgentTask
@@ -20,6 +21,18 @@ class CreateRunRequest(BaseModel):
 class RunAccepted(BaseModel):
     id: str
     status: RunStatus
+
+
+class RunListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    start_url: str
+    goal: str
+    status: RunStatus
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
 
 
 class RunResponse(BaseModel):
@@ -48,6 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Probe", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.post("/runs", response_model=RunAccepted, status_code=status.HTTP_202_ACCEPTED)
@@ -58,6 +77,18 @@ async def create_run(
     run = await queue.submit(AgentTask(start_url=payload.start_url, goal=payload.goal))
     response.headers["Location"] = f"/runs/{run.id}"
     return RunAccepted(id=run.id, status=run.status)
+
+
+@app.get("/runs", response_model=list[RunListItem])
+async def list_runs(
+    request: Request,
+    status_filter: RunStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[RunListItem]:
+    queue: RunQueueService = request.app.state.run_queue
+    runs = await queue.list_runs(status=status_filter, limit=limit, offset=offset)
+    return [RunListItem.model_validate(run) for run in runs]
 
 
 @app.get("/runs/{run_id}", response_model=RunResponse)
