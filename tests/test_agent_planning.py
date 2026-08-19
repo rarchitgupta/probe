@@ -5,6 +5,7 @@ import unittest
 
 from qa_agent.agent.planning import (
     ProgressEntry,
+    TestSpec,
     TestStep,
     build_step_prompt,
     sanitize_summary,
@@ -13,6 +14,13 @@ from qa_agent.browser.observation import InteractiveElement, PageObservation
 
 
 class AgentPlanningTest(unittest.TestCase):
+    def test_limits_generated_title_to_five_words(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at most 5 words"):
+            TestSpec(
+                title="This title contains far too many words",
+                steps=[TestStep(id=1, kind="assertion", instruction="Verify")],
+            )
+
     def test_sanitizes_known_password_values(self) -> None:
         self.assertEqual(
             sanitize_summary(

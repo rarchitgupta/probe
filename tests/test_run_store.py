@@ -6,7 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent import AgentTask, ProgressEntry
 from qa_agent.database import Base
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
@@ -44,6 +44,7 @@ class RunStoreTest(unittest.IsolatedAsyncioTestCase):
                 usage={},
                 error=None,
                 artifact_directory=".runs/run-1",
+                title="Verify Example Page",
             ),
         )
         fetched = await self.store.get_details("run-1")
@@ -52,6 +53,7 @@ class RunStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded, created)
         self.assertEqual(running.status, RunStatus.RUNNING)
         self.assertEqual(fetched.status if fetched else None, RunStatus.PASSED)
+        self.assertEqual(fetched.title if fetched else None, "Verify Example Page")
         self.assertEqual(
             fetched.result.evidence if fetched and fetched.result else None,
             ("Page visible",),
@@ -77,6 +79,19 @@ class RunStoreTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([run.id for run in all_runs], ["run-2", "run-1"])
         self.assertEqual([run.id for run in running], ["run-2"])
+
+    async def test_records_progress_events_in_order(self) -> None:
+        await self.store.create(_task())
+        await self.store.add_progress(
+            "run-1",
+            ProgressEntry(action="click", target="Login", success=True),
+        )
+
+        events = await self.store.list_events("run-1")
+        later_events = await self.store.list_events("run-1", after=events[0].id)
+
+        self.assertEqual([event.action for event in events], [None, "click"])
+        self.assertEqual([event.action for event in later_events], ["click"])
 
 
 def _task(task_id: str = "run-1") -> AgentTask:

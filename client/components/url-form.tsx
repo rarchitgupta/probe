@@ -1,6 +1,7 @@
 "use client"
 
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useRouter } from "next/navigation"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
@@ -37,6 +38,7 @@ const formSchema = z.object({
 
 export function URLForm() {
   const createRun = useCreateRun()
+  const router = useRouter()
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -50,8 +52,8 @@ export function URLForm() {
       { start_url: values.website, goal: values.instructions },
       {
         onSuccess: ({ id }) => {
-          form.reset()
           toast.success("Task queued", { description: `Run ${id}` })
+          router.push(`/runs/${id}`)
         },
         onError: (error) =>
           toast.error("Could not queue task", {

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from qa_agent.agent import AgentTask
 from qa_agent.runner import AgentTaskResult
-from qa_agent.runs import RunQueueService, RunStatus, RunStore
+from qa_agent.runs import RunEventKind, RunQueueService, RunStatus, RunStore
 
 
 class CreateRunRequest(BaseModel):
@@ -27,6 +27,7 @@ class RunListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    title: str | None
     start_url: str
     goal: str
     status: RunStatus
@@ -39,6 +40,7 @@ class RunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    title: str | None
     start_url: str
     goal: str
     status: RunStatus
@@ -47,6 +49,19 @@ class RunResponse(BaseModel):
     finished_at: datetime | None
     result: AgentTaskResult | None
     error: str | None
+
+
+class RunEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: RunEventKind
+    created_at: datetime
+    status: RunStatus | None
+    action: str | None
+    element: str | None
+    success: bool | None
+    message: str | None
 
 
 @asynccontextmanager
@@ -91,10 +106,28 @@ async def list_runs(
     return [RunListItem.model_validate(run) for run in runs]
 
 
-@app.get("/runs/{run_id}", response_model=RunResponse)
+@app.get(
+    "/runs/{run_id}",
+    response_model=RunResponse,
+    response_model_exclude={"result": {"title"}},
+)
 async def get_run(run_id: str, request: Request) -> RunResponse:
     queue: RunQueueService = request.app.state.run_queue
     run = await queue.get_details(run_id)
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found")
     return RunResponse.model_validate(run)
+
+
+@app.get("/runs/{run_id}/events", response_model=list[RunEventResponse])
+async def list_run_events(
+    run_id: str,
+    request: Request,
+    after: int = Query(default=0, ge=0),
+) -> list[RunEventResponse]:
+    queue: RunQueueService = request.app.state.run_queue
+    try:
+        events = await queue.list_events(run_id, after=after)
+    except KeyError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found") from None
+    return [RunEventResponse.model_validate(event) for event in events]

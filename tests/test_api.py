@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 from qa_agent.agent import AgentTask
 from qa_agent.api import app, lifespan
-from qa_agent.runs import RunQueueService, RunStatus, TaskRun
+from qa_agent.runner import AgentTaskResult
+from qa_agent.runs import RunEvent, RunEventKind, RunQueueService, RunStatus, TaskRun
 
 
 class ApiLifespanTest(unittest.IsolatedAsyncioTestCase):
@@ -62,10 +63,33 @@ class CreateRunTest(unittest.TestCase):
         submitted: list[AgentTask] = []
         run = TaskRun(
             id="run-1",
+            title="Verify Example Page",
             start_url="https://example.com/",
             goal="Verify the page",
             status=RunStatus.QUEUED,
             created_at=datetime.now(UTC),
+        )
+        completed = TaskRun(
+            id="run-2",
+            title="Verify Example Page",
+            start_url=run.start_url,
+            goal=run.goal,
+            status=RunStatus.PASSED,
+            created_at=run.created_at,
+            result=AgentTaskResult(
+                task_id="run-2",
+                status="passed",
+                start_url=run.start_url,
+                final_url=run.start_url,
+                http_status=200,
+                summary="Passed",
+                evidence=(),
+                diagnostics=(),
+                usage={},
+                error=None,
+                artifact_directory=".runs/run-2",
+                title="Verify Example Page",
+            ),
         )
 
         async def submit(task: AgentTask) -> TaskRun:
@@ -77,8 +101,28 @@ class CreateRunTest(unittest.TestCase):
         queue.close = AsyncMock()
         queue.submit = AsyncMock(side_effect=submit)
         queue.list_runs = AsyncMock(return_value=[run])
+        queue.list_events = AsyncMock(
+            side_effect=lambda run_id, after=0: (
+                [
+                    RunEvent(
+                        id=1,
+                        kind=RunEventKind.STATUS,
+                        created_at=run.created_at,
+                        status=RunStatus.QUEUED,
+                        action=None,
+                        element=None,
+                        success=None,
+                        message="Run queued",
+                    )
+                ]
+                if run_id == run.id
+                else (_ for _ in ()).throw(KeyError(run_id))
+            )
+        )
         queue.get_details = AsyncMock(
-            side_effect=lambda run_id: run if run_id == run.id else None
+            side_effect=lambda run_id: {run.id: run, completed.id: completed}.get(
+                run_id
+            )
         )
 
         with (
@@ -96,6 +140,9 @@ class CreateRunTest(unittest.TestCase):
             listed = client.get("/runs?status=queued&limit=10&offset=0")
             invalid_filter = client.get("/runs?status=unknown")
             fetched = client.get("/runs/run-1")
+            events = client.get("/runs/run-1/events")
+            missing_events = client.get("/runs/missing/events")
+            completed_response = client.get("/runs/run-2")
             missing = client.get("/runs/missing")
 
         self.assertEqual(response.status_code, 202)
@@ -104,6 +151,7 @@ class CreateRunTest(unittest.TestCase):
         self.assertEqual(invalid.status_code, 422)
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()[0]["id"], "run-1")
+        self.assertEqual(listed.json()[0]["title"], "Verify Example Page")
         self.assertNotIn("result", listed.json()[0])
         self.assertEqual(invalid_filter.status_code, 422)
         queue.list_runs.assert_awaited_once_with(
@@ -113,6 +161,10 @@ class CreateRunTest(unittest.TestCase):
         self.assertEqual(fetched.json()["id"], "run-1")
         self.assertEqual(fetched.json()["status"], "queued")
         self.assertIsNone(fetched.json()["result"])
+        self.assertEqual(events.json()[0]["status"], "queued")
+        self.assertEqual(missing_events.status_code, 404)
+        self.assertEqual(completed_response.json()["title"], "Verify Example Page")
+        self.assertNotIn("title", completed_response.json()["result"])
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json(), {"detail": "Run not found"})
         task = submitted[0]

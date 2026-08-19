@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -46,6 +47,7 @@ AGENT_USAGE_LIMITS = UsageLimits(
 )
 AGENT_EXECUTION_POLICY = ExecutionPolicy(timeout_seconds=150)
 MAX_STEP_ROUNDS = 6
+ProgressHandler = Callable[[ProgressEntry], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ class AgentTaskResult:
     usage: dict[str, object]
     error: str | None
     artifact_directory: str
+    title: str | None = None
 
 
 async def execute_inspection(
@@ -140,6 +143,7 @@ async def execute_agent_task(
     policy: ExecutionPolicy = AGENT_EXECUTION_POLICY,
     usage_limits: UsageLimits = AGENT_USAGE_LIMITS,
     artifact_root: Path = Path(".runs"),
+    event_handler: ProgressHandler | None = None,
 ) -> AgentTaskResult:
     load_dotenv()
     keep_diagnostics = os.getenv("PROBE_DIAGNOSTICS", "").lower() in {
@@ -154,6 +158,7 @@ async def execute_agent_task(
     final_url: str | None = None
     http_status: int | None = None
     summary: str | None = None
+    title: str | None = None
     evidence: tuple[str, ...] = ()
     diagnostics: tuple[ActionDiagnostic, ...] = ()
     usage: dict[str, object] = {}
@@ -201,6 +206,7 @@ async def execute_agent_task(
                             usage_limits=usage_limits,
                             usage=run_usage,
                         )
+                        title = spec_run.output.title
                         completed_steps = []
                         for step in spec_run.output.steps:
                             deps.successful_actions.clear()
@@ -235,6 +241,9 @@ async def execute_agent_task(
                                 batch_progress, executed = await execute_instructions(
                                     deps, decision.actions
                                 )
+                                if event_handler:
+                                    for event in batch_progress:
+                                        await event_handler(event)
                                 progress.extend(batch_progress)
                                 batch_succeeded = all(
                                     entry.success for entry in batch_progress
@@ -312,6 +321,8 @@ async def execute_agent_task(
 
     if deps:
         diagnostics = tuple(deps.diagnostics)
+        if title:
+            title = sanitize_summary(title, deps.sensitive_values)
     usage = asdict(run_usage)
     if usage.get("cost") is not None:
         usage["cost"] = str(usage["cost"])
@@ -330,6 +341,7 @@ async def execute_agent_task(
         usage=usage,
         error=error,
         artifact_directory=str(artifacts.run),
+        title=title,
     )
     artifacts.write_result(asdict(result))
     if langfuse:

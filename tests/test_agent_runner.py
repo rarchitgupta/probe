@@ -46,6 +46,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                         ToolCallPart(
                             info.output_tools[0].name,
                             {
+                                "title": "Fill Example Form",
                                 "steps": [
                                     {
                                         "id": 1,
@@ -57,7 +58,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
                                     },
-                                ]
+                                ],
                             },
                         )
                     ]
@@ -117,6 +118,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                         ToolCallPart(
                             info.output_tools[0].name,
                             {
+                                "title": "Fill Example Form",
                                 "steps": [
                                     {
                                         "id": 1,
@@ -128,7 +130,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
                                     },
-                                ]
+                                ],
                             },
                         )
                     ]
@@ -199,6 +201,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, "passed")
         self.assertEqual(result.summary, "Completed all 2 test steps")
+        self.assertEqual(result.title, "Fill Example Form")
         self.assertEqual(result.usage["requests"], 3)
         self.assertEqual(result.diagnostics, ())
         self.assertEqual(saved["diagnostics"], [])

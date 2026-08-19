@@ -26,6 +26,7 @@ def passed_result(task: AgentTask) -> AgentTaskResult:
         usage={},
         error=None,
         artifact_directory=f".runs/{task.task_id}",
+        title="Verify Example Page",
     )
 
 

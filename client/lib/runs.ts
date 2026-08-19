@@ -33,6 +33,7 @@ export type RunResult = {
 
 export type Run = {
   id: string
+  title: string | null
   start_url: string
   goal: string
   status: RunStatus
@@ -41,6 +42,29 @@ export type Run = {
   finished_at: string | null
   result: RunResult | null
   error: string | null
+}
+
+export type RunListItem = Pick<
+  Run,
+  | "id"
+  | "title"
+  | "start_url"
+  | "goal"
+  | "status"
+  | "created_at"
+  | "started_at"
+  | "finished_at"
+>
+
+export type RunEvent = {
+  id: number
+  kind: "status" | "action" | "assertion"
+  created_at: string
+  status: RunStatus | null
+  action: string | null
+  element: string | null
+  success: boolean | null
+  message: string | null
 }
 
 async function responseJson<T>(response: Response): Promise<T> {
@@ -64,6 +88,14 @@ export async function getRun(runId: string): Promise<Run> {
   return responseJson(await fetch(`${API_URL}/runs/${runId}`))
 }
 
+export async function getRuns(): Promise<RunListItem[]> {
+  return responseJson(await fetch(`${API_URL}/runs`))
+}
+
+export async function getRunEvents(runId: string): Promise<RunEvent[]> {
+  return responseJson(await fetch(`${API_URL}/runs/${runId}/events`))
+}
+
 export function useCreateRun() {
   return useMutation({ mutationFn: createRun })
 }
@@ -73,5 +105,21 @@ export function useRun(runId: string | null) {
     queryKey: ["runs", runId],
     queryFn: () => getRun(runId!),
     enabled: runId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === "queued" || status === "running" ? 2000 : false
+    },
+  })
+}
+
+export function useRuns() {
+  return useQuery({ queryKey: ["runs"], queryFn: getRuns })
+}
+
+export function useRunEvents(runId: string, status?: RunStatus) {
+  return useQuery({
+    queryKey: ["runs", runId, "events"],
+    queryFn: () => getRunEvents(runId),
+    refetchInterval: status === "queued" || status === "running" ? 1000 : false,
   })
 }
