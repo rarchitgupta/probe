@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 const API_URL = process.env.NEXT_PUBLIC_PROBE_API_URL ?? "http://127.0.0.1:8000"
 
@@ -12,23 +12,27 @@ export type CreateRunInput = {
   goal: string
 }
 
-export type RunAccepted = {
-  id: string
-  status: RunStatus
+export type RunUsage = {
+  input_tokens: number | null
+  output_tokens: number | null
+  cache_read_tokens: number | null
+  requests: number | null
+  cost: string | null
 }
 
 export type RunResult = {
-  task_id: string
-  status: "passed" | "failed" | "blocked" | "error"
-  start_url: string
   final_url: string | null
   http_status: number | null
   summary: string | null
   evidence: string[]
-  diagnostics: unknown[]
-  usage: Record<string, number | string>
-  error: string | null
-  artifact_directory: string
+  usage: RunUsage
+}
+
+export type RunStats = {
+  duration_ms: number | null
+  action_count: number
+  assertion_count: number
+  failed_action_count: number
 }
 
 export type Run = {
@@ -40,6 +44,7 @@ export type Run = {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  stats: RunStats
   result: RunResult | null
   error: string | null
 }
@@ -74,7 +79,7 @@ async function responseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function createRun(input: CreateRunInput): Promise<RunAccepted> {
+export async function createRun(input: CreateRunInput): Promise<Run> {
   return responseJson(
     await fetch(`${API_URL}/runs`, {
       method: "POST",
@@ -97,7 +102,15 @@ export async function getRunEvents(runId: string): Promise<RunEvent[]> {
 }
 
 export function useCreateRun() {
-  return useMutation({ mutationFn: createRun })
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: createRun,
+    onSuccess: (run) => {
+      queryClient.setQueryData(["runs", run.id], run)
+      void queryClient.invalidateQueries({ queryKey: ["runs"], exact: true })
+    },
+  })
 }
 
 export function useRun(runId: string | null) {
@@ -113,7 +126,16 @@ export function useRun(runId: string | null) {
 }
 
 export function useRuns() {
-  return useQuery({ queryKey: ["runs"], queryFn: getRuns })
+  return useQuery({
+    queryKey: ["runs"],
+    queryFn: getRuns,
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (run) => run.status === "queued" || run.status === "running"
+      )
+        ? 2000
+        : false,
+  })
 }
 
 export function useRunEvents(runId: string, status?: RunStatus) {

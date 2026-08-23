@@ -37,6 +37,7 @@ class TaskRun:
     finished_at: datetime | None = None
     result: AgentTaskResult | None = None
     error: str | None = None
+    events: tuple[RunEvent, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -280,6 +281,7 @@ def _run_event(record: RunEventRecord) -> RunEvent:
 def _task_run(
     record: TaskRunRecord, events: list[RunEventRecord] | None = None
 ) -> TaskRun:
+    run_events = tuple(_run_event(event) for event in events or ())
     result = None
     if record.artifact_directory:
         evidence = [
@@ -323,4 +325,5 @@ def _task_run(
         finished_at=record.finished_at,
         result=result,
         error=record.error,
+        events=run_events,
     )

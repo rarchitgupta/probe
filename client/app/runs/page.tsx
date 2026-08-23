@@ -1,96 +1,75 @@
 "use client"
 
 import Link from "next/link"
-import {
-  Ban,
-  CircleAlert,
-  CircleCheck,
-  CircleX,
-  Clock3,
-  LoaderCircle,
-  OctagonX,
-  type LucideIcon,
-} from "lucide-react"
+import { PlusIcon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { type RunStatus, useRuns } from "@/lib/runs"
-
-const statusBadges: Record<RunStatus, { icon: LucideIcon; className: string }> =
-  {
-    queued: { icon: Clock3, className: "bg-muted text-muted-foreground" },
-    running: {
-      icon: LoaderCircle,
-      className:
-        "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
-    },
-    passed: {
-      icon: CircleCheck,
-      className:
-        "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
-    },
-    failed: {
-      icon: CircleX,
-      className:
-        "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
-    },
-    blocked: {
-      icon: OctagonX,
-      className:
-        "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
-    },
-    error: {
-      icon: CircleAlert,
-      className:
-        "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
-    },
-    cancelled: { icon: Ban, className: "bg-muted text-muted-foreground" },
-  }
-
-function StatusBadge({ status }: { status: RunStatus }) {
-  const { icon: Icon, className } = statusBadges[status]
-
-  return (
-    <Badge variant="outline" className={`font-mono uppercase ${className}`}>
-      <Icon data-icon="inline-start" />
-      {status}
-    </Badge>
-  )
-}
+import { RunListItem } from "@/components/run-list-item"
+import { Card, CardContent } from "@/components/ui/card"
+import { buttonVariants } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useRuns } from "@/lib/runs"
 
 export default function RunsPage() {
   const runs = useRuns()
 
   return (
-    <main className="flex flex-1 flex-col gap-2 p-8">
-      {/* <h1 className="text-2xl font-semibold">Runs</h1> */}
-      {runs.isPending && <p>Loading runs...</p>}
-      {runs.isError && <p>Could not load runs: {runs.error.message}</p>}
-      {runs.data?.length === 0 && <p>No runs yet.</p>}
-      {runs.data?.map((run) => (
-        <Card key={run.id} className="w-full">
-          <CardHeader>
-            <CardTitle>
-              <Link href={`/runs/${run.id}`}>
-                {run.title ?? "Untitled run"}
-              </Link>
-            </CardTitle>
-            <CardAction>
-              <StatusBadge status={run.status} />
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <p>Website: {run.start_url}</p>
-            <p>Created: {new Date(run.created_at).toLocaleString()}</p>
-          </CardContent>
-        </Card>
-      ))}
+    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-6 lg:p-8">
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
+          <p className="text-sm text-muted-foreground">
+            Monitor recent QA tasks and review their results.
+          </p>
+        </div>
+        <Link href="/" className={buttonVariants()}>
+          <PlusIcon data-icon="inline-start" />
+          New run
+        </Link>
+      </header>
+
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-sm font-medium">Recent runs</h2>
+          {runs.data && (
+            <p className="text-xs text-muted-foreground">
+              Showing {runs.data.length}
+            </p>
+          )}
+        </div>
+
+        {runs.isPending && (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }, (_, index) => (
+              <Skeleton key={index} className="h-36 w-full" />
+            ))}
+          </div>
+        )}
+
+        {runs.isError && (
+          <Card>
+            <CardContent className="text-sm text-destructive">
+              Could not load runs: {runs.error.message}
+            </CardContent>
+          </Card>
+        )}
+
+        {runs.data?.length === 0 && (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="font-medium">No runs yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Submit your first QA task to see it here.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="space-y-3">
+          {runs.data?.map((run) => (
+            <RunListItem key={run.id} run={run} />
+          ))}
+        </div>
+      </section>
     </main>
   )
 }

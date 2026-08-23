@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
@@ -63,7 +63,7 @@ class CreateRunTest(unittest.TestCase):
         submitted: list[AgentTask] = []
         run = TaskRun(
             id="run-1",
-            title="Verify Example Page",
+            title=None,
             start_url="https://example.com/",
             goal="Verify the page",
             status=RunStatus.QUEUED,
@@ -76,6 +76,8 @@ class CreateRunTest(unittest.TestCase):
             goal=run.goal,
             status=RunStatus.PASSED,
             created_at=run.created_at,
+            started_at=run.created_at,
+            finished_at=run.created_at + timedelta(seconds=2),
             result=AgentTaskResult(
                 task_id="run-2",
                 status="passed",
@@ -85,10 +87,39 @@ class CreateRunTest(unittest.TestCase):
                 summary="Passed",
                 evidence=(),
                 diagnostics=(),
-                usage={},
+                usage={
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "cache_read_tokens": 80,
+                    "requests": 2,
+                    "tool_calls": 0,
+                    "cost": "0.0001",
+                },
                 error=None,
                 artifact_directory=".runs/run-2",
                 title="Verify Example Page",
+            ),
+            events=(
+                RunEvent(
+                    id=2,
+                    kind=RunEventKind.ACTION,
+                    created_at=run.created_at,
+                    status=None,
+                    action="click",
+                    element="Submit",
+                    success=True,
+                    message="page_changed",
+                ),
+                RunEvent(
+                    id=3,
+                    kind=RunEventKind.ASSERTION,
+                    created_at=run.created_at,
+                    status=None,
+                    action=None,
+                    element=None,
+                    success=True,
+                    message="Page visible",
+                ),
             ),
         )
 
@@ -146,12 +177,29 @@ class CreateRunTest(unittest.TestCase):
             missing = client.get("/runs/missing")
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json(), {"id": "run-1", "status": "queued"})
+        self.assertEqual(response.json()["id"], "run-1")
+        self.assertIsNone(response.json()["title"])
+        self.assertEqual(response.json()["start_url"], "https://example.com/")
+        self.assertEqual(response.json()["goal"], "Verify the page")
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertIsNone(response.json()["started_at"])
+        self.assertIsNone(response.json()["finished_at"])
+        self.assertIsNone(response.json()["result"])
+        self.assertEqual(
+            response.json()["stats"],
+            {
+                "duration_ms": None,
+                "action_count": 0,
+                "assertion_count": 0,
+                "failed_action_count": 0,
+            },
+        )
+        self.assertIsNone(response.json()["error"])
         self.assertEqual(response.headers["location"], "/runs/run-1")
         self.assertEqual(invalid.status_code, 422)
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()[0]["id"], "run-1")
-        self.assertEqual(listed.json()[0]["title"], "Verify Example Page")
+        self.assertIsNone(listed.json()[0]["title"])
         self.assertNotIn("result", listed.json()[0])
         self.assertEqual(invalid_filter.status_code, 422)
         queue.list_runs.assert_awaited_once_with(
@@ -164,7 +212,22 @@ class CreateRunTest(unittest.TestCase):
         self.assertEqual(events.json()[0]["status"], "queued")
         self.assertEqual(missing_events.status_code, 404)
         self.assertEqual(completed_response.json()["title"], "Verify Example Page")
-        self.assertNotIn("title", completed_response.json()["result"])
+        completed_json = completed_response.json()
+        self.assertEqual(
+            completed_json["stats"],
+            {
+                "duration_ms": 2000,
+                "action_count": 1,
+                "assertion_count": 1,
+                "failed_action_count": 0,
+            },
+        )
+        self.assertEqual(
+            set(completed_json["result"]),
+            {"summary", "final_url", "http_status", "evidence", "usage"},
+        )
+        self.assertNotIn("tool_calls", completed_json["result"]["usage"])
+        self.assertEqual(completed_json["result"]["usage"]["requests"], 2)
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json(), {"detail": "Run not found"})
         task = submitted[0]
