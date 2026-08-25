@@ -69,7 +69,7 @@ export function URLForm() {
         <CardHeader>
           <CardTitle>New QA task</CardTitle>
           <CardDescription>
-            Create a new QA run for Probe to execute
+            Describe a focused browser flow and its expected outcome
           </CardDescription>
         </CardHeader>
         <CardContent className="my-4">
@@ -115,9 +115,9 @@ export function URLForm() {
             />
           </FieldGroup>
         </CardContent>
-        <CardFooter>
+        <CardFooter className="justify-end">
           <Button type="submit" disabled={createRun.isPending}>
-            {createRun.isPending ? "Queuing..." : "Run Task"}
+            {createRun.isPending ? "Queuing..." : "Run task"}
           </Button>
         </CardFooter>
       </form>

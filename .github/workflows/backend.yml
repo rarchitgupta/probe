@@ -41,8 +41,11 @@ jobs:
       - name: Build
         run: uv build
 
+      - name: Test
+        run: uv run pytest -m "not browser"
+
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
 
-      - name: Test
-        run: uv run python -m unittest discover -s tests -v
+      - name: Browser tests
+        run: uv run pytest -m browser

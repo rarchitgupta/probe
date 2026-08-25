@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import io
-import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from qa_agent.cli import main
 from qa_agent.runner import AgentTaskResult
 
 
-class CliTest(unittest.TestCase):
+class TestCli:
     def test_runs_agent_with_readable_output(self) -> None:
         result = AgentTaskResult(
             task_id="task-1",
@@ -33,7 +34,7 @@ class CliTest(unittest.TestCase):
                 new=AsyncMock(return_value=result),
             ) as execute,
             redirect_stdout(output),
-            self.assertRaises(SystemExit) as exit_code,
+            pytest.raises(SystemExit) as exit_code,
         ):
             main(
                 [
@@ -46,12 +47,12 @@ class CliTest(unittest.TestCase):
             )
 
         task = execute.call_args.args[0]
-        self.assertEqual(str(task.start_url), "https://example.com/")
-        self.assertEqual(task.goal, "Verify checkout")
-        self.assertEqual(execute.call_args.kwargs["artifact_root"], Path("artifacts"))
-        self.assertEqual(exit_code.exception.code, 0)
-        self.assertIn("PASSED  task-1", output.getvalue())
-        self.assertIn("4 requests · 5 tools · $0.000260", output.getvalue())
+        assert str(task.start_url) == "https://example.com/"
+        assert task.goal == "Verify checkout"
+        assert execute.call_args.kwargs["artifact_root"] == Path("artifacts")
+        assert exit_code.value.code == 0
+        assert "PASSED  task-1" in output.getvalue()
+        assert "4 requests · 5 tools · $0.000260" in output.getvalue()
 
     def test_runs_agent_through_queue(self) -> None:
         result = AgentTaskResult(
@@ -74,7 +75,7 @@ class CliTest(unittest.TestCase):
                 new=AsyncMock(return_value=result),
             ) as execute,
             redirect_stdout(io.StringIO()),
-            self.assertRaises(SystemExit) as exit_code,
+            pytest.raises(SystemExit) as exit_code,
         ):
             main(
                 [
@@ -87,9 +88,5 @@ class CliTest(unittest.TestCase):
                 ]
             )
 
-        self.assertEqual(execute.call_args.args[1:], (Path("artifacts"),))
-        self.assertEqual(exit_code.exception.code, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert execute.call_args.args[1:] == (Path("artifacts"),)
+        assert exit_code.value.code == 0

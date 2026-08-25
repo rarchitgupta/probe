@@ -1,39 +1,44 @@
 from __future__ import annotations
 
 import json
-import unittest
+
+import pytest
 
 from qa_agent.agent.planning import (
     ProgressEntry,
-    TestSpec,
-    TestStep,
     build_step_prompt,
     sanitize_summary,
+)
+from qa_agent.agent.planning import (
+    TestSpec as AgentTestSpec,
+)
+from qa_agent.agent.planning import (
+    TestStep as AgentTestStep,
 )
 from qa_agent.browser.observation import InteractiveElement, PageObservation
 
 
-class AgentPlanningTest(unittest.TestCase):
+class TestAgentPlanning:
     def test_limits_generated_title_to_five_words(self) -> None:
-        with self.assertRaisesRegex(ValueError, "at most 5 words"):
-            TestSpec(
+        with pytest.raises(ValueError, match="at most 5 words"):
+            AgentTestSpec(
                 title="This title contains far too many words",
-                steps=[TestStep(id=1, kind="assertion", instruction="Verify")],
+                steps=[AgentTestStep(id=1, kind="assertion", instruction="Verify")],
             )
 
     def test_sanitizes_known_password_values(self) -> None:
-        self.assertEqual(
+        assert (
             sanitize_summary(
                 "Logged in with standard_user/secret_sauce",
                 {"secret_sauce"},
-            ),
-            "Logged in with standard_user/[REDACTED]",
+            )
+            == "Logged in with standard_user/[REDACTED]"
         )
 
     def test_builds_compact_prompt(self) -> None:
         prompt = build_step_prompt(
-            TestStep(id=2, kind="action", instruction="Submit"),
-            [TestStep(id=1, kind="action", instruction="Fill the email")],
+            AgentTestStep(id=2, kind="action", instruction="Submit"),
+            [AgentTestStep(id=1, kind="action", instruction="Fill the email")],
             [ProgressEntry(action=f"old-{index}", success=True) for index in range(13)],
             PageObservation(
                 url="https://example.com/login",
@@ -45,13 +50,9 @@ class AgentPlanningTest(unittest.TestCase):
         )
 
         data = json.loads(prompt)
-        self.assertNotIn("goal", data)
-        self.assertEqual(data["page"]["elements"][0]["name"], "Email")
-        self.assertEqual(data["completed_steps"][0]["instruction"], "Fill the email")
-        self.assertEqual(len(data["current_step_progress"]), 10)
-        self.assertEqual(data["current_step_progress"][0]["action"], "old-3")
-        self.assertNotIn("tag", prompt)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert "goal" not in data
+        assert data["page"]["elements"][0]["name"] == "Email"
+        assert data["completed_steps"][0]["instruction"] == "Fill the email"
+        assert len(data["current_step_progress"]) == 10
+        assert data["current_step_progress"][0]["action"] == "old-3"
+        assert "tag" not in prompt

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from urllib.parse import quote
+
+import pytest
 
 from qa_agent.browser import (
     BrowserSession,
@@ -14,8 +15,10 @@ from qa_agent.browser import (
     SetCheckedAction,
 )
 
+pytestmark = pytest.mark.browser
 
-class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
+
+class TestBrowserSession:
     async def test_records_and_dismisses_dialog(self) -> None:
         html = "<button onclick=\"alert('Message received!')\">Submit</button>"
         with tempfile.TemporaryDirectory() as directory:
@@ -29,8 +32,8 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                 )
                 assertion = session.assert_dialog_message("Message received!")
 
-        self.assertTrue(clicked.success)
-        self.assertTrue(assertion.success)
+        assert clicked.success
+        assert assertion.success
 
     async def test_scrolls_down_and_back_up_with_fresh_observations(self) -> None:
         html = """
@@ -49,13 +52,13 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                 up = await session.execute(ScrollAction("scroll", "up"))
                 top_again = await session.observe()
 
-        self.assertTrue(top.can_scroll_down)
-        self.assertTrue(down.success)
-        self.assertTrue(bottom.can_scroll_up)
-        self.assertIn("Bottom action", [element.name for element in bottom.elements])
-        self.assertTrue(up.success)
-        self.assertFalse(top_again.can_scroll_up)
-        self.assertIn("Top action", [element.name for element in top_again.elements])
+        assert top.can_scroll_down
+        assert down.success
+        assert bottom.can_scroll_up
+        assert "Bottom action" in [element.name for element in bottom.elements]
+        assert up.success
+        assert not top_again.can_scroll_up
+        assert "Top action" in [element.name for element in top_again.elements]
 
     async def test_sets_and_verifies_form_controls(self) -> None:
         html = """
@@ -70,14 +73,14 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                 await session.navigate(f"data:text/html,{quote(html)}")
                 observation = await session.observe()
                 checkbox_id = observation.elements[0].id
-                self.assertFalse(observation.elements[0].checked)
-                self.assertEqual(observation.elements[1].selected_option, "Canada")
+                assert not observation.elements[0].checked
+                assert observation.elements[1].selected_option == "Canada"
 
                 checked = await session.execute(
                     SetCheckedAction("set_checked", checkbox_id, True)
                 )
                 observation = await session.observe()
-                self.assertTrue(observation.elements[0].checked)
+                assert observation.elements[0].checked
                 checked_assertion = await session.assert_checked(
                     observation.elements[0].id, True
                 )
@@ -88,15 +91,15 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                     )
                 )
                 observation = await session.observe()
-                self.assertEqual(observation.elements[1].selected_option, "Japan")
+                assert observation.elements[1].selected_option == "Japan"
                 selected_assertion = await session.assert_selected_option(
                     observation.elements[1].id, "Japan"
                 )
 
-        self.assertTrue(checked.success)
-        self.assertTrue(checked_assertion.success)
-        self.assertTrue(selected.success)
-        self.assertTrue(selected_assertion.success)
+        assert checked.success
+        assert checked_assertion.success
+        assert selected.success
+        assert selected_assertion.success
 
     async def test_element_reference_survives_inserted_interactive_element(
         self,
@@ -120,8 +123,8 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
                     ClickAction(action="click", element_id=target_id)
                 )
 
-                self.assertTrue(result.success)
-                self.assertEqual(await session.page.title(), "Clicked")
+                assert result.success
+                assert await session.page.title() == "Clicked"
 
     async def test_observe_fill_click_and_reobserve(self) -> None:
         html = """
@@ -140,37 +143,33 @@ class BrowserSessionTest(unittest.IsolatedAsyncioTestCase):
 
                 observation = await session.observe()
                 username_id = observation.elements[0].id
-                self.assertFalse(observation.elements[0].filled)
+                assert not observation.elements[0].filled
                 result = await session.execute(
                     FillAction(
                         action="fill", element_id=username_id, value="standard_user"
                     )
                 )
-                self.assertTrue(result.success)
+                assert result.success
 
                 stale_result = await session.execute(
                     ClickAction(action="click", element_id=username_id)
                 )
-                self.assertFalse(stale_result.success)
+                assert not stale_result.success
 
                 observation = await session.observe()
-                self.assertTrue(observation.elements[0].filled)
+                assert observation.elements[0].filled
                 password_id = observation.elements[1].id
                 result = await session.execute(
                     FillAction(action="fill", element_id=password_id, value="secret")
                 )
-                self.assertTrue(result.success)
+                assert result.success
 
                 observation = await session.observe()
                 login_id = observation.elements[2].id
                 result = await session.execute(
                     ClickAction(action="click", element_id=login_id)
                 )
-                self.assertTrue(result.success)
+                assert result.success
 
                 observation = await session.observe()
-                self.assertEqual(observation.title, "Dashboard")
-
-
-if __name__ == "__main__":
-    unittest.main()
+                assert observation.title == "Dashboard"

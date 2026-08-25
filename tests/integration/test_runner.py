@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 from qa_agent.runner import InspectionTask, execute_inspection
 
+pytestmark = pytest.mark.browser
 
-class InspectionRunnerTest(unittest.IsolatedAsyncioTestCase):
+
+class TestInspectionRunner:
     async def test_inspects_page_and_writes_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -25,19 +28,15 @@ class InspectionRunnerTest(unittest.IsolatedAsyncioTestCase):
                 artifact_root=root,
             )
 
-            self.assertEqual(result.status, "completed")
-            self.assertEqual(result.title, "QA Agent")
-            self.assertEqual(len(result.elements), 2)
-            self.assertEqual(result.elements[0].role, "textbox")
-            self.assertEqual(result.elements[0].name, "Email")
-            self.assertEqual(result.elements[1].role, "button")
-            self.assertEqual(result.elements[1].name, "Sign in")
-            self.assertTrue((root / "test-run" / "screenshot.png").exists())
-            self.assertTrue((root / "test-run" / "trace.zip").exists())
+            assert result.status == "completed"
+            assert result.title == "QA Agent"
+            assert len(result.elements) == 2
+            assert result.elements[0].role == "textbox"
+            assert result.elements[0].name == "Email"
+            assert result.elements[1].role == "button"
+            assert result.elements[1].name == "Sign in"
+            assert (root / "test-run" / "screenshot.png").exists()
+            assert (root / "test-run" / "trace.zip").exists()
             saved = json.loads((root / "test-run" / "result.json").read_text())
-            self.assertEqual(saved["task_id"], "test-run")
-            self.assertEqual(saved["elements"][0]["name"], "Email")
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert saved["task_id"] == "test-run"
+            assert saved["elements"][0]["name"] == "Email"
