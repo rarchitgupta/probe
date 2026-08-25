@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, HttpUrl, model_validator
 from pydantic_ai import Agent
 
 from qa_agent.browser import PageObservation
+from qa_agent.failures import FailureCategory
 
 SENSITIVE_SUMMARY_VALUE = re.compile(
     r"(\b(?:password|passcode|api[ _-]?key|access[ _-]?token)\b\s*"
@@ -49,6 +50,7 @@ class ToolResult(BaseModel):
     success: bool
     error: str | None = None
     observation: PageState | None = None
+    failure_category: FailureCategory | None = None
 
 
 class FormField(BaseModel):

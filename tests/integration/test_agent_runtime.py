@@ -9,6 +9,7 @@ import pytest
 from qa_agent.agent.planning import ClickInstruction, FormField, page_state
 from qa_agent.agent.runtime import AgentDeps, execute_instructions, perform_fill_form
 from qa_agent.browser import BrowserSession
+from qa_agent.failures import FailureCategory
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
 pytestmark = pytest.mark.browser
@@ -61,3 +62,4 @@ class TestAgentRuntime:
                 assert await browser.page.locator("input[type=checkbox]").is_checked()
                 assert not repeated[0].success
                 assert "already completed" in (repeated[0].error or "")
+                assert deps.failure_category == FailureCategory.ACTION_FAILURE

@@ -194,8 +194,10 @@ def test_writes_portable_json_report_atomically(tmp_path) -> None:
     )
     report = BenchmarkReport.model_validate_json(path.read_text(encoding="utf-8"))
 
-    assert report.schema_version == 1
+    assert report.schema_version == 2
     assert report.metadata.model == "test-model"
+    assert report.metadata.prompt_version == "1"
+    assert report.metadata.model_config_version == "1"
     assert report.metadata.git_commit == "abc123"
     assert report.suite.cases[0].goal == "Log in and verify the dashboard"
     assert report.result.metrics.success_rate == 1
@@ -242,6 +244,8 @@ def test_compares_candidate_against_compatible_baseline(tmp_path) -> None:
     assert comparison.deltas.p95_duration_ms == 600
     assert comparison.baseline_commit == "baseline-commit"
     assert comparison.candidate_model == "candidate-model"
+    assert comparison.baseline_prompt_version == "1"
+    assert comparison.candidate_model_config_version == "1"
 
 
 def test_rejects_comparison_between_different_suites(tmp_path) -> None:

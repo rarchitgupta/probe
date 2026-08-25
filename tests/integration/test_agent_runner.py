@@ -15,6 +15,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from qa_agent.agent import AgentTask
 from qa_agent.evaluation import EvaluationCase, run_trial
+from qa_agent.failures import FailureCategory
 from qa_agent.runner import execute_agent_task
 
 pytestmark = pytest.mark.browser
@@ -106,6 +107,10 @@ class TestAgentRunner:
             thread.join()
 
         assert result.error == "Model request timed out after 60 seconds"
+        assert result.failure_category == FailureCategory.MODEL_TIMEOUT
+        assert result.configuration is not None
+        assert result.configuration.prompt_version == "1"
+        assert result.configuration.model_config_version == "1"
         assert len(result.diagnostics) == 1
         assert result.diagnostics[0].action == "fill"
 
@@ -216,6 +221,8 @@ class TestAgentRunner:
         assert trial.agent_status == "passed"
         assert trial.oracle_passed is False
         assert trial.verdict == "false_pass"
+        assert trial.failure_category is None
+        assert trial.configuration is not None
         assert trial.duration_ms is not None
         assert trial.duration_ms > 0
         assert saved["summary"] == "Completed all 2 test steps"

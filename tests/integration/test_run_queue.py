@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from qa_agent.agent import AgentTask
+from qa_agent.failures import FailureCategory
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import RunQueueService, RunStatus, RunStore, TaskRun
 
@@ -83,6 +84,7 @@ class TestRunQueueService:
             failed = await _run(service, "run-1")
             assert failed.status == RunStatus.ERROR
             assert failed.error == "RuntimeError: browser crashed"
+            assert failed.failure_category == FailureCategory.INFRASTRUCTURE_ERROR
             assert (await _run(service, "run-2")).status == RunStatus.PASSED
         finally:
             await service.close()

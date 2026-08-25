@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.configuration import AgentConfiguration
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
 
@@ -28,6 +29,7 @@ class TestRunStore:
                 error=None,
                 artifact_directory=".runs/run-1",
                 title="Verify Example Page",
+                configuration=AgentConfiguration(model="test-model"),
             ),
         )
         fetched = await run_store.get_details("run-1")
@@ -40,6 +42,11 @@ class TestRunStore:
         assert (fetched.result.evidence if fetched and fetched.result else None) == (
             "Page visible",
         )
+        assert (
+            fetched.result.configuration.model
+            if fetched and fetched.result and fetched.result.configuration
+            else None
+        ) == "test-model"
         with pytest.raises(InvalidRunTransitionError):
             await run_store.mark_running("run-1")
 

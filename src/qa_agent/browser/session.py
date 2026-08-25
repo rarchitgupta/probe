@@ -27,6 +27,7 @@ from qa_agent.browser.observation import (
     InteractiveElement,
     PageObservation,
 )
+from qa_agent.failures import FailureCategory
 
 MAX_RECORDED_ERRORS = 100
 
@@ -76,6 +77,7 @@ class ActionResult:
     element_id: int | None
     success: bool
     error: str | None = None
+    failure_category: FailureCategory | None = None
 
 
 class BrowserSession:
@@ -166,7 +168,11 @@ class BrowserSession:
                 return ActionResult("scroll", None, True)
             except Exception as exc:
                 return ActionResult(
-                    "scroll", None, False, f"{type(exc).__name__}: {exc}"
+                    "scroll",
+                    None,
+                    False,
+                    f"{type(exc).__name__}: {exc}",
+                    FailureCategory.BROWSER_ERROR,
                 )
             finally:
                 self._element_refs.clear()
@@ -178,6 +184,7 @@ class BrowserSession:
                 element_id=action.element_id,
                 success=False,
                 error="Unknown or stale element ID; observe the page again",
+                failure_category=FailureCategory.ACTION_FAILURE,
             )
 
         try:
@@ -187,6 +194,7 @@ class BrowserSession:
                     element_id=action.element_id,
                     success=False,
                     error="Element is disabled",
+                    failure_category=FailureCategory.ACTION_FAILURE,
                 )
             if isinstance(action, ClickAction):
                 await locator.click()
@@ -207,6 +215,7 @@ class BrowserSession:
                 element_id=action.element_id,
                 success=False,
                 error=f"{type(exc).__name__}: {exc}",
+                failure_category=FailureCategory.BROWSER_ERROR,
             )
         finally:
             self._element_refs.clear()

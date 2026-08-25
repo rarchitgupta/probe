@@ -9,7 +9,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.configuration import AgentConfiguration
 from qa_agent.database import async_session_factory
+from qa_agent.failures import FailureCategory
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs.models import RunEventKind, RunEventRecord, RunStatus, TaskRunRecord
 
@@ -37,6 +39,7 @@ class TaskRun:
     finished_at: datetime | None = None
     result: AgentTaskResult | None = None
     error: str | None = None
+    failure_category: FailureCategory | None = None
     events: tuple[RunEvent, ...] = ()
 
 
@@ -164,7 +167,27 @@ class RunStore:
             "http_status": result.http_status if result else None,
             "summary": result.summary if result else None,
             "error": error,
+            "failure_category": (
+                result.failure_category
+                if result
+                else FailureCategory.INFRASTRUCTURE_ERROR
+                if error
+                else None
+            ),
             "artifact_directory": result.artifact_directory if result else None,
+            "model_name": (
+                result.configuration.model if result and result.configuration else None
+            ),
+            "prompt_version": (
+                result.configuration.prompt_version
+                if result and result.configuration
+                else None
+            ),
+            "model_config_version": (
+                result.configuration.model_config_version
+                if result and result.configuration
+                else None
+            ),
             "input_tokens": usage.get("input_tokens"),
             "output_tokens": usage.get("output_tokens"),
             "cache_read_tokens": usage.get("cache_read_tokens"),
@@ -208,6 +231,7 @@ class RunStore:
                     status=RunStatus.ERROR,
                     finished_at=datetime.now(UTC),
                     error="Worker stopped before the run completed",
+                    failure_category=FailureCategory.INFRASTRUCTURE_ERROR,
                 )
             )
             records = (
@@ -311,6 +335,18 @@ def _task_run(
             error=record.error,
             artifact_directory=record.artifact_directory,
             title=record.title,
+            failure_category=record.failure_category,
+            configuration=(
+                AgentConfiguration(
+                    model=record.model_name,
+                    prompt_version=record.prompt_version,
+                    model_config_version=record.model_config_version,
+                )
+                if record.model_name
+                and record.prompt_version
+                and record.model_config_version
+                else None
+            ),
         )
     return TaskRun(
         id=record.id,
@@ -323,5 +359,6 @@ def _task_run(
         finished_at=record.finished_at,
         result=result,
         error=record.error,
+        failure_category=record.failure_category,
         events=run_events,
     )

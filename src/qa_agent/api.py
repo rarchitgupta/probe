@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from qa_agent.agent import AgentTask
+from qa_agent.failures import FailureCategory
 from qa_agent.runs import (
     RunEventKind,
     RunQueueService,
@@ -44,12 +45,19 @@ class RunUsageResponse(BaseModel):
     cost: str | None = None
 
 
+class AgentConfigurationResponse(BaseModel):
+    model: str
+    prompt_version: str
+    model_config_version: str
+
+
 class RunResultResponse(BaseModel):
     summary: str | None
     final_url: str | None
     http_status: int | None
     evidence: tuple[str, ...]
     usage: RunUsageResponse
+    configuration: AgentConfigurationResponse | None
 
 
 class RunStatsResponse(BaseModel):
@@ -73,6 +81,7 @@ class RunResponse(BaseModel):
     stats: RunStatsResponse
     result: RunResultResponse | None
     error: str | None
+    failure_category: FailureCategory | None
 
 
 class RunEventResponse(BaseModel):
@@ -187,9 +196,17 @@ def _run_response(run: TaskRun) -> RunResponse:
                 http_status=result.http_status,
                 evidence=result.evidence,
                 usage=RunUsageResponse.model_validate(result.usage),
+                configuration=(
+                    AgentConfigurationResponse.model_validate(
+                        result.configuration, from_attributes=True
+                    )
+                    if result.configuration
+                    else None
+                ),
             )
             if result
             else None
         ),
         error=run.error,
+        failure_category=run.failure_category,
     )

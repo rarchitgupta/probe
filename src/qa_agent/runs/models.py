@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from qa_agent.database import Base
+from qa_agent.failures import FailureCategory
 
 
 def utc_now() -> datetime:
@@ -71,6 +72,13 @@ run_event_kind_type = Enum(
     values_callable=lambda kinds: [kind.value for kind in kinds],
     validate_strings=True,
 )
+failure_category_type = Enum(
+    FailureCategory,
+    name="failure_category",
+    native_enum=False,
+    values_callable=lambda categories: [category.value for category in categories],
+    validate_strings=True,
+)
 timestamp_type = UTCDateTime()
 
 
@@ -99,7 +107,13 @@ class TaskRunRecord(Base):
     http_status: Mapped[int | None]
     summary: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    failure_category: Mapped[FailureCategory | None] = mapped_column(
+        failure_category_type
+    )
     artifact_directory: Mapped[str | None] = mapped_column(Text)
+    model_name: Mapped[str | None] = mapped_column(String(100))
+    prompt_version: Mapped[str | None] = mapped_column(String(32))
+    model_config_version: Mapped[str | None] = mapped_column(String(32))
 
     input_tokens: Mapped[int | None]
     output_tokens: Mapped[int | None]

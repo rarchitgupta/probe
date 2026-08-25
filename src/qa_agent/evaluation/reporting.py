@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 
+from qa_agent.configuration import MODEL_CONFIG_VERSION, PROMPT_VERSION
 from qa_agent.evaluation.models import (
     BenchmarkComparison,
     BenchmarkDeltas,
@@ -37,6 +38,10 @@ def compare_reports(
         suite_version=candidate.suite.version,
         baseline_model=baseline.metadata.model,
         candidate_model=candidate.metadata.model,
+        baseline_prompt_version=baseline.metadata.prompt_version,
+        candidate_prompt_version=candidate.metadata.prompt_version,
+        baseline_model_config_version=baseline.metadata.model_config_version,
+        candidate_model_config_version=candidate.metadata.model_config_version,
         baseline_commit=baseline.metadata.git_commit,
         candidate_commit=candidate.metadata.git_commit,
         quality_regressed=success_rate_delta < 0 or false_pass_rate_delta > 0,
@@ -84,12 +89,16 @@ def write_report(
     path: Path,
     *,
     model_name: str,
+    prompt_version: str = PROMPT_VERSION,
+    model_config_version: str = MODEL_CONFIG_VERSION,
     git_commit: str | None = None,
 ) -> Path:
     report = BenchmarkReport(
         metadata=ReportMetadata(
             generated_at=datetime.now(UTC),
             model=model_name,
+            prompt_version=prompt_version,
+            model_config_version=model_config_version,
             probe_version=version("probe"),
             playwright_version=version("playwright"),
             python_version=platform.python_version(),

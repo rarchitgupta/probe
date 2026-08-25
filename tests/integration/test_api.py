@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from qa_agent.agent import AgentTask
 from qa_agent.api import app, lifespan
+from qa_agent.configuration import AgentConfiguration
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import RunEvent, RunEventKind, RunQueueService, RunStatus, TaskRun
 
@@ -94,6 +95,7 @@ class TestCreateRun:
                 error=None,
                 artifact_directory=".runs/run-2",
                 title="Verify Example Page",
+                configuration=AgentConfiguration(model="test-model"),
             ),
             events=(
                 RunEvent(
@@ -188,6 +190,7 @@ class TestCreateRun:
             "failed_action_count": 0,
         }
         assert response.json()["error"] is None
+        assert response.json()["failure_category"] is None
         assert response.headers["location"] == "/runs/run-1"
         assert invalid.status_code == 422
         assert listed.status_code == 200
@@ -218,8 +221,14 @@ class TestCreateRun:
             "http_status",
             "evidence",
             "usage",
+            "configuration",
         }
         assert completed_json["result"]["usage"]["requests"] == 2
+        assert completed_json["result"]["configuration"] == {
+            "model": "test-model",
+            "prompt_version": "1",
+            "model_config_version": "1",
+        }
         assert missing.status_code == 404
         assert missing.json() == {"detail": "Run not found"}
         task = submitted[0]

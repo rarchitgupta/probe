@@ -7,6 +7,16 @@ const API_URL = process.env.NEXT_PUBLIC_PROBE_API_URL ?? "http://127.0.0.1:8000"
 export type RunStatus =
   "queued" | "running" | "passed" | "failed" | "blocked" | "error" | "cancelled"
 
+export type FailureCategory =
+  | "model_timeout"
+  | "model_error"
+  | "execution_timeout"
+  | "policy_violation"
+  | "browser_error"
+  | "assertion_failure"
+  | "action_failure"
+  | "infrastructure_error"
+
 export type CreateRunInput = {
   start_url: string
   goal: string
@@ -26,6 +36,11 @@ export type RunResult = {
   summary: string | null
   evidence: string[]
   usage: RunUsage
+  configuration: {
+    model: string
+    prompt_version: string
+    model_config_version: string
+  } | null
 }
 
 export type RunStats = {
@@ -47,6 +62,7 @@ export type Run = {
   stats: RunStats
   result: RunResult | null
   error: string | null
+  failure_category: FailureCategory | null
 }
 
 export type RunListItem = Pick<

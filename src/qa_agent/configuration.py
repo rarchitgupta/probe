@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+PROMPT_VERSION = "1"
+MODEL_CONFIG_VERSION = "1"
+
+
+@dataclass(frozen=True)
+class AgentConfiguration:
+    model: str
+    prompt_version: str = PROMPT_VERSION
+    model_config_version: str = MODEL_CONFIG_VERSION

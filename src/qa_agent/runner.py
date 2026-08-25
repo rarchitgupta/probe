@@ -12,6 +12,7 @@ from typing import Literal
 
 from langfuse import propagate_attributes
 from openai import APITimeoutError
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
 from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
 from pydantic_ai.models import Model
@@ -30,13 +31,16 @@ from qa_agent.agent import (
 )
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser import BrowserSession
+from qa_agent.configuration import AgentConfiguration
+from qa_agent.failures import FailureCategory
 from qa_agent.llm import (
+    DEEPSEEK_MODEL_NAME,
     DEEPSEEK_SETTINGS,
     MODEL_REQUEST_TIMEOUT_SECONDS,
     deepseek_model,
 )
 from qa_agent.observability import configure_observability
-from qa_agent.policy import ExecutionGuard, ExecutionPolicy
+from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,8 @@ class AgentTaskResult:
     artifact_directory: str
     title: str | None = None
     duration_ms: int | None = None
+    failure_category: FailureCategory | None = None
+    configuration: AgentConfiguration | None = None
 
 
 async def execute_agent_task(
@@ -95,9 +101,17 @@ async def execute_agent_task(
     diagnostics: tuple[ActionDiagnostic, ...] = ()
     usage: dict[str, object] = {}
     error: str | None = None
+    failure_category: FailureCategory | None = None
     deps: AgentDeps | None = None
     run_usage = RunUsage()
     duration_ms: int | None = None
+    configuration = AgentConfiguration(
+        model=(
+            str(getattr(model, "model_name", type(model).__name__))
+            if model
+            else DEEPSEEK_MODEL_NAME
+        )
+    )
 
     try:
         async with asyncio.timeout(guard.remaining_seconds):
@@ -125,6 +139,9 @@ async def execute_agent_task(
                             metadata={
                                 "task_id": task.task_id,
                                 "target_host": task.start_url.host,
+                                "model": configuration.model,
+                                "prompt_version": configuration.prompt_version,
+                                "model_config_version": configuration.model_config_version,
                             },
                             tags=["browser-qa"],
                             trace_name="browser-qa-task",
@@ -144,6 +161,7 @@ async def execute_agent_task(
                         completed_steps = []
                         for step in spec_run.output.steps:
                             deps.successful_actions.clear()
+                            deps.failure_category = None
                             progress: list[ProgressEntry] = []
                             evidence_before = len(deps.evidence)
                             for _ in range(MAX_STEP_ROUNDS):
@@ -167,6 +185,11 @@ async def execute_agent_task(
                                 decision = decision_run.output
                                 if decision.failure:
                                     status = "blocked" if decision.blocked else "failed"
+                                    failure_category = deps.failure_category or (
+                                        FailureCategory.ASSERTION_FAILURE
+                                        if step.kind == "assertion"
+                                        else FailureCategory.ACTION_FAILURE
+                                    )
                                     summary = sanitize_summary(
                                         decision.failure, deps.sensitive_values
                                     )
@@ -222,6 +245,11 @@ async def execute_agent_task(
                                     )
                             else:
                                 status = "failed"
+                                failure_category = deps.failure_category or (
+                                    FailureCategory.ASSERTION_FAILURE
+                                    if step.kind == "assertion"
+                                    else FailureCategory.ACTION_FAILURE
+                                )
                                 summary = f"Step {step.id} exceeded its execution limit"
 
                             if status in {"failed", "blocked"}:
@@ -242,18 +270,28 @@ async def execute_agent_task(
                     except Exception:
                         pass
     except APITimeoutError:
+        failure_category = FailureCategory.MODEL_TIMEOUT
         error = (
             f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
         )
     except ModelAPIError as exc:
-        error = (
-            f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
-            if isinstance(exc.__cause__, APITimeoutError)
-            else f"{type(exc).__name__}: {exc}"
-        )
+        if isinstance(exc.__cause__, APITimeoutError):
+            failure_category = FailureCategory.MODEL_TIMEOUT
+            error = f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
+        else:
+            failure_category = FailureCategory.MODEL_ERROR
+            error = f"{type(exc).__name__}: {exc}"
     except TimeoutError:
+        failure_category = FailureCategory.EXECUTION_TIMEOUT
         error = f"Execution timed out after {policy.timeout_seconds:g} seconds"
+    except PolicyViolation as exc:
+        failure_category = FailureCategory.POLICY_VIOLATION
+        error = str(exc)
+    except PlaywrightError as exc:
+        failure_category = FailureCategory.BROWSER_ERROR
+        error = f"{type(exc).__name__}: {exc}"
     except Exception as exc:
+        failure_category = FailureCategory.INFRASTRUCTURE_ERROR
         error = f"{type(exc).__name__}: {exc}"
 
     if deps:
@@ -280,6 +318,8 @@ async def execute_agent_task(
         artifact_directory=str(artifacts.run),
         title=title,
         duration_ms=duration_ms,
+        failure_category=failure_category,
+        configuration=configuration,
     )
     artifacts.write_result(asdict(result))
     if langfuse:

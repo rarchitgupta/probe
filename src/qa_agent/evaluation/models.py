@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from qa_agent.assertions import AssertionResult, PageAssertion
+from qa_agent.configuration import AgentConfiguration
+from qa_agent.failures import FailureCategory
 
 
 class EvaluationModel(BaseModel):
@@ -64,6 +66,8 @@ class TrialResult(EvaluationModel):
     usage: dict[str, object]
     artifact_directory: str
     error: str | None
+    failure_category: FailureCategory | None = None
+    configuration: AgentConfiguration | None = None
 
 
 class BenchmarkMetrics(EvaluationModel):
@@ -92,6 +96,8 @@ class BenchmarkResult(EvaluationModel):
 class ReportMetadata(EvaluationModel):
     generated_at: datetime
     model: str
+    prompt_version: str
+    model_config_version: str
     probe_version: str
     playwright_version: str
     python_version: str
@@ -100,7 +106,7 @@ class ReportMetadata(EvaluationModel):
 
 
 class BenchmarkReport(EvaluationModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     metadata: ReportMetadata
     suite: EvaluationSuite
     result: BenchmarkResult
@@ -125,6 +131,10 @@ class BenchmarkComparison(EvaluationModel):
     suite_version: int
     baseline_model: str
     candidate_model: str
+    baseline_prompt_version: str
+    candidate_prompt_version: str
+    baseline_model_config_version: str
+    candidate_model_config_version: str
     baseline_commit: str | None
     candidate_commit: str | None
     quality_regressed: bool

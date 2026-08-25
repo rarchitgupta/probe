@@ -19,6 +19,7 @@ from qa_agent.evaluation.models import (
     TrialResult,
     TrialVerdict,
 )
+from qa_agent.failures import FailureCategory
 from qa_agent.runner import AGENT_EXECUTION_POLICY, AgentTaskResult, execute_agent_task
 
 
@@ -59,6 +60,8 @@ async def run_trial(
         usage=result.usage,
         artifact_directory=result.artifact_directory,
         error=result.error,
+        failure_category=result.failure_category,
+        configuration=result.configuration,
     )
 
 
@@ -154,10 +157,13 @@ def _usage_decimal(trial: TrialResult, key: str) -> Decimal:
 
 
 def _verdict(result: AgentTaskResult, outcome: OutcomeGrade | None) -> TrialVerdict:
+    if result.failure_category in {
+        FailureCategory.MODEL_TIMEOUT,
+        FailureCategory.EXECUTION_TIMEOUT,
+    }:
+        return "timeout"
     if result.error:
-        return (
-            "timeout" if "timed out" in result.error.lower() else "infrastructure_error"
-        )
+        return "infrastructure_error"
     if outcome and outcome.passed:
         return "true_pass" if result.status == "passed" else "false_failure"
     if result.status == "passed":

@@ -35,6 +35,7 @@ from qa_agent.browser import (
     SetCheckedAction,
 )
 from qa_agent.execution import execute_guarded_action
+from qa_agent.failures import FailureCategory
 from qa_agent.policy import ExecutionGuard, PolicyViolation
 
 
@@ -62,6 +63,7 @@ class AgentDeps:
     )
     sensitive_values: set[str] = field(default_factory=set)
     successful_actions: set[tuple[object, ...]] = field(default_factory=set)
+    failure_category: FailureCategory | None = None
 
 
 async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolResult:
@@ -69,18 +71,29 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
     for form_field in fields:
         target = deps.elements.get(form_field.element_id)
         if not target:
+            deps.failure_category = FailureCategory.ACTION_FAILURE
             return ToolResult(
-                success=False, error=f"Unknown element ID {form_field.element_id}"
+                success=False,
+                error=f"Unknown element ID {form_field.element_id}",
+                failure_category=deps.failure_category,
             )
         if isinstance(form_field.value, bool) and target.role not in {
             "checkbox",
             "radio",
         }:
+            deps.failure_category = FailureCategory.ACTION_FAILURE
             return ToolResult(
-                success=False, error=f"Element {form_field.element_id} is not checkable"
+                success=False,
+                error=f"Element {form_field.element_id} is not checkable",
+                failure_category=deps.failure_category,
             )
         if target.role == "radio" and form_field.value is False:
-            return ToolResult(success=False, error="Radio buttons cannot be unchecked")
+            deps.failure_category = FailureCategory.ACTION_FAILURE
+            return ToolResult(
+                success=False,
+                error="Radio buttons cannot be unchecked",
+                failure_category=deps.failure_category,
+            )
         targets.append((target, form_field.value))
 
     result = ToolResult(success=True)
@@ -93,9 +106,11 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
             == (target.role, target.name, target.input_type)
         ]
         if len(matches) != 1:
+            deps.failure_category = FailureCategory.ACTION_FAILURE
             return ToolResult(
                 success=False,
                 error=f"Field {target.name!r} is no longer uniquely available",
+                failure_category=deps.failure_category,
             )
         element_id = matches[0].id
         action_name = (
@@ -128,13 +143,13 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
             return result
         executed = True
         deps.successful_actions.add(action_key)
-    return (
-        result
-        if executed
-        else ToolResult(
-            success=False,
-            error="These fields were already completed; choose another action or finish the step",
-        )
+    if executed:
+        return result
+    deps.failure_category = FailureCategory.ACTION_FAILURE
+    return ToolResult(
+        success=False,
+        error="These fields were already completed; choose another action or finish the step",
+        failure_category=deps.failure_category,
     )
 
 
@@ -160,6 +175,10 @@ async def _execute(
         deps.previous_fill_values[key] = action.value
 
     result = await execute_guarded_action(deps.browser, deps.guard, action)
+    if not result.success:
+        deps.failure_category = (
+            result.failure_category or FailureCategory.ACTION_FAILURE
+        )
     after_url = deps.browser.page.url if deps.browser.page else ""
     deps.diagnostics.append(
         ActionDiagnostic(
@@ -176,17 +195,28 @@ async def _execute(
     try:
         deps.guard.check_url(after_url)
     except PolicyViolation:
-        return ToolResult(success=False, error=result.error)
+        deps.failure_category = FailureCategory.POLICY_VIOLATION
+        return ToolResult(
+            success=False,
+            error=result.error,
+            failure_category=deps.failure_category,
+        )
 
     state = page_state(await deps.browser.observe())
     deps.elements = {element.id: element for element in state.elements}
-    return ToolResult(success=result.success, error=result.error, observation=state)
+    return ToolResult(
+        success=result.success,
+        error=result.error,
+        observation=state,
+        failure_category=result.failure_category,
+    )
 
 
 async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResult:
     try:
         deps.guard.check_url(deps.browser.page.url if deps.browser.page else "")
     except PolicyViolation as exc:
+        deps.failure_category = FailureCategory.POLICY_VIOLATION
         return AssertionResult(
             assertion=assertion.assertion,
             success=False,
@@ -211,6 +241,8 @@ async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResu
         deps.evidence.append(
             f"{result.assertion}: expected={result.expected!r}, actual={result.actual!r}"
         )
+    else:
+        deps.failure_category = FailureCategory.ASSERTION_FAILURE
     return result
 
 
@@ -237,9 +269,11 @@ async def execute_instructions(
                 True if isinstance(action, SetCheckedAction) else None,
             )
             if action_key in deps.successful_actions:
+                deps.failure_category = FailureCategory.ACTION_FAILURE
                 result = ToolResult(
                     success=False,
                     error="This action was already completed; choose another action or finish the step",
+                    failure_category=deps.failure_category,
                 )
             else:
                 result = await _execute(deps, action)
