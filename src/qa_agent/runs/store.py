@@ -169,7 +169,6 @@ class RunStore:
             "output_tokens": usage.get("output_tokens"),
             "cache_read_tokens": usage.get("cache_read_tokens"),
             "request_count": usage.get("requests"),
-            "tool_call_count": usage.get("tool_calls"),
             "cost": Decimal(str(usage["cost"])) if usage.get("cost") else None,
         }
         async with self.sessions.begin() as session:
@@ -294,7 +293,6 @@ def _task_run(
             "output_tokens": record.output_tokens,
             "cache_read_tokens": record.cache_read_tokens,
             "requests": record.request_count,
-            "tool_calls": record.tool_call_count,
             "cost": str(record.cost) if record.cost is not None else None,
         }
         result = AgentTaskResult(

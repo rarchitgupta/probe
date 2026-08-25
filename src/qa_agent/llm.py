@@ -9,6 +9,7 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 60
+DEEPSEEK_MODEL_NAME = "deepseek-v4-flash"
 
 DEEPSEEK_SETTINGS = OpenAIChatModelSettings(
     max_tokens=1024,
@@ -22,7 +23,7 @@ def deepseek_model() -> OpenAIChatModel:
     api_key = os.getenv("DEEPSEEK_API_KEY")
     provider = DeepSeekProvider(api_key=api_key)
     return OpenAIChatModel(
-        "deepseek-v4-flash",
+        DEEPSEEK_MODEL_NAME,
         profile=OpenAIModelProfile(
             openai_chat_supports_max_completion_tokens=False,
         ),

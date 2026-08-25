@@ -89,7 +89,6 @@ class TestCreateRun:
                     "output_tokens": 20,
                     "cache_read_tokens": 80,
                     "requests": 2,
-                    "tool_calls": 0,
                     "cost": "0.0001",
                 },
                 error=None,
@@ -220,7 +219,6 @@ class TestCreateRun:
             "evidence",
             "usage",
         }
-        assert "tool_calls" not in completed_json["result"]["usage"]
         assert completed_json["result"]["usage"]["requests"] == 2
         assert missing.status_code == 404
         assert missing.json() == {"detail": "Run not found"}

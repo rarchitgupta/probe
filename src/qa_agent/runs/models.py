@@ -105,7 +105,6 @@ class TaskRunRecord(Base):
     output_tokens: Mapped[int | None]
     cache_read_tokens: Mapped[int | None]
     request_count: Mapped[int | None]
-    tool_call_count: Mapped[int | None]
     cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
 
 

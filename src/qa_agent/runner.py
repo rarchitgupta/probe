@@ -6,13 +6,13 @@ import os
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Literal
 
-from dotenv import load_dotenv
 from langfuse import propagate_attributes
 from openai import APITimeoutError
+from playwright.async_api import Page
 from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
 from pydantic_ai.models import Model
 
@@ -29,7 +29,7 @@ from qa_agent.agent import (
     step_agent,
 )
 from qa_agent.artifacts import ArtifactPaths
-from qa_agent.browser import BrowserSession, InteractiveElement
+from qa_agent.browser import BrowserSession
 from qa_agent.llm import (
     DEEPSEEK_SETTINGS,
     MODEL_REQUEST_TIMEOUT_SECONDS,
@@ -48,29 +48,7 @@ AGENT_USAGE_LIMITS = UsageLimits(
 AGENT_EXECUTION_POLICY = ExecutionPolicy(timeout_seconds=150)
 MAX_STEP_ROUNDS = 6
 ProgressHandler = Callable[[ProgressEntry], Awaitable[None]]
-
-
-@dataclass(frozen=True)
-class InspectionTask:
-    task_id: str
-    url: str
-
-
-@dataclass(frozen=True)
-class InspectionResult:
-    task_id: str
-    status: Literal["completed", "error"]
-    started_at: str
-    finished_at: str
-    requested_url: str
-    final_url: str | None
-    title: str | None
-    http_status: int | None
-    elements: tuple[InteractiveElement, ...]
-    console_errors: tuple[str, ...]
-    failed_requests: tuple[str, ...]
-    error: str | None
-    artifact_directory: str
+FinalPageHandler = Callable[[Page], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -87,53 +65,7 @@ class AgentTaskResult:
     error: str | None
     artifact_directory: str
     title: str | None = None
-
-
-async def execute_inspection(
-    task: InspectionTask,
-    *,
-    artifact_root: Path = Path(".runs"),
-) -> InspectionResult:
-    started_at = datetime.now(UTC).isoformat()
-    artifacts = ArtifactPaths.create(artifact_root, task.task_id)
-    final_url: str | None = None
-    title: str | None = None
-    http_status: int | None = None
-    elements: tuple[InteractiveElement, ...] = ()
-    error: str | None = None
-
-    async with BrowserSession(trace_path=artifacts.trace) as browser:
-        try:
-            http_status = await browser.navigate(task.url)
-            observation = await browser.observe()
-            final_url = observation.url
-            title = observation.title
-            elements = observation.elements
-        except Exception as exc:
-            final_url = browser.page.url if browser.page else None
-            error = f"{type(exc).__name__}: {exc}"
-        try:
-            await browser.screenshot(artifacts.screenshot)
-        except Exception:
-            pass
-
-    result = InspectionResult(
-        task_id=task.task_id,
-        status="error" if error else "completed",
-        started_at=started_at,
-        finished_at=datetime.now(UTC).isoformat(),
-        requested_url=task.url,
-        final_url=final_url,
-        title=title,
-        http_status=http_status,
-        elements=elements,
-        console_errors=tuple(browser.console_errors),
-        failed_requests=tuple(browser.failed_requests),
-        error=error,
-        artifact_directory=str(artifacts.run),
-    )
-    artifacts.write_result(asdict(result))
-    return result
+    duration_ms: int | None = None
 
 
 async def execute_agent_task(
@@ -144,8 +76,8 @@ async def execute_agent_task(
     usage_limits: UsageLimits = AGENT_USAGE_LIMITS,
     artifact_root: Path = Path(".runs"),
     event_handler: ProgressHandler | None = None,
+    final_page_handler: FinalPageHandler | None = None,
 ) -> AgentTaskResult:
-    load_dotenv()
     keep_diagnostics = os.getenv("PROBE_DIAGNOSTICS", "").lower() in {
         "1",
         "true",
@@ -165,10 +97,12 @@ async def execute_agent_task(
     error: str | None = None
     deps: AgentDeps | None = None
     run_usage = RunUsage()
+    duration_ms: int | None = None
 
     try:
         async with asyncio.timeout(guard.remaining_seconds):
             async with BrowserSession(trace_path=artifacts.trace) as browser:
+                execution_started = perf_counter()
                 try:
                     start_url = str(task.start_url)
                     guard.check_url(start_url)
@@ -299,7 +233,10 @@ async def execute_agent_task(
                         evidence = tuple(deps.evidence)
                     diagnostics = tuple(deps.diagnostics)
                 finally:
+                    duration_ms = round((perf_counter() - execution_started) * 1000)
                     final_url = browser.page.url if browser.page else final_url
+                    if final_page_handler and browser.page:
+                        await final_page_handler(browser.page)
                     try:
                         await browser.screenshot(artifacts.screenshot)
                     except Exception:
@@ -342,6 +279,7 @@ async def execute_agent_task(
         error=error,
         artifact_directory=str(artifacts.run),
         title=title,
+        duration_ms=duration_ms,
     )
     artifacts.write_result(asdict(result))
     if langfuse:

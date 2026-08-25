@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///.probe/probe.db"
-
-load_dotenv()
 
 
 class Base(DeclarativeBase):
