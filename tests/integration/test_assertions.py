@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from urllib.parse import quote
+
+import pytest
 
 from qa_agent.assertions import (
     TextVisibleAssertion,
@@ -12,8 +13,10 @@ from qa_agent.assertions import (
 )
 from qa_agent.browser import BrowserSession
 
+pytestmark = pytest.mark.browser
 
-class BrowserAssertionTest(unittest.IsolatedAsyncioTestCase):
+
+class TestBrowserAssertion:
     async def test_evaluates_generic_browser_conditions(self) -> None:
         html = """
             <title>Loading</title>
@@ -44,13 +47,9 @@ class BrowserAssertionTest(unittest.IsolatedAsyncioTestCase):
                     timeout_ms=50,
                 )
 
-        self.assertTrue(url_result.success)
-        self.assertTrue(title_result.success)
-        self.assertTrue(text_result.success)
-        self.assertFalse(failure.success)
-        self.assertEqual(failure.actual, None)
-        self.assertIn("50 ms", failure.error or "")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert url_result.success
+        assert title_result.success
+        assert text_result.success
+        assert not failure.success
+        assert failure.actual is None
+        assert "50 ms" in (failure.error or "")

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import unittest
+import pytest
 
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation, origin
 
 
-class ExecutionPolicyTest(unittest.TestCase):
+class TestExecutionPolicy:
     def test_defaults_to_starting_origin(self) -> None:
         policy = ExecutionPolicy().for_start_url("https://example.com/login")
         guard = ExecutionGuard(policy)
 
         guard.check_url("https://example.com/account")
-        with self.assertRaises(PolicyViolation):
+        with pytest.raises(PolicyViolation):
             guard.check_url("https://other.example/account")
 
     def test_enforces_action_limit(self) -> None:
@@ -20,13 +20,9 @@ class ExecutionPolicyTest(unittest.TestCase):
         )
 
         guard.record_action()
-        with self.assertRaises(PolicyViolation):
+        with pytest.raises(PolicyViolation):
             guard.record_action()
 
     def test_normalizes_origins(self) -> None:
-        self.assertEqual(origin("https://example.com/path"), "https://example.com")
-        self.assertEqual(origin("data:text/html,hello"), "data:")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert origin("https://example.com/path") == "https://example.com"
+        assert origin("data:text/html,hello") == "data:"

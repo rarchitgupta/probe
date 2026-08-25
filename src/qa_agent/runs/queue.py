@@ -6,7 +6,7 @@ from contextlib import suppress
 
 from qa_agent.agent import AgentTask
 from qa_agent.runner import AgentTaskResult, execute_agent_task
-from qa_agent.runs.store import RunStatus, RunStore, TaskRun
+from qa_agent.runs.store import RunEvent, RunStatus, RunStore, TaskRun
 
 RunExecutor = Callable[[AgentTask], Awaitable[AgentTaskResult]]
 
@@ -16,7 +16,7 @@ class RunQueueService:
     def __init__(
         self,
         store: RunStore,
-        executor: RunExecutor = execute_agent_task,
+        executor: RunExecutor | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
@@ -52,6 +52,9 @@ class RunQueueService:
     ) -> list[TaskRun]:
         return await self.store.list_runs(status=status, limit=limit, offset=offset)
 
+    async def list_events(self, run_id: str, *, after: int = 0) -> list[RunEvent]:
+        return await self.store.list_events(run_id, after=after)
+
     async def join(self) -> None:
         await self._queue.join()
 
@@ -79,7 +82,14 @@ class RunQueueService:
         await self.store.mark_running(run_id)
         task = AgentTask(task_id=run.id, start_url=run.start_url, goal=run.goal)
         try:
-            result = await self.executor(task)
+            result = (
+                await self.executor(task)
+                if self.executor
+                else await execute_agent_task(
+                    task,
+                    event_handler=lambda event: self.store.add_progress(run_id, event),
+                )
+            )
         except Exception as exc:
             await self.store.finish(
                 run_id,

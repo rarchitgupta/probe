@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from urllib.parse import quote
 
+import pytest
+
 from qa_agent.browser import BrowserSession
 
+pytestmark = pytest.mark.browser
 
-class BrowserObservationTest(unittest.IsolatedAsyncioTestCase):
+
+class TestBrowserObservation:
     async def test_keeps_only_available_controls_and_names_image_links(self) -> None:
         html = """
             <style>
@@ -32,15 +35,8 @@ class BrowserObservationTest(unittest.IsolatedAsyncioTestCase):
                 await session.navigate(f"data:text/html,{quote(html)}")
                 observation = await session.observe()
 
-        self.assertEqual(
-            [(element.role, element.name) for element in observation.elements],
-            [
-                ("button", "Visible"),
-                ("link", "Shopping cart"),
-                ("link", "JavaScript link"),
-            ],
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert [(element.role, element.name) for element in observation.elements] == [
+            ("button", "Visible"),
+            ("link", "Shopping cart"),
+            ("link", "JavaScript link"),
+        ]

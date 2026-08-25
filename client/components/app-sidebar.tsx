@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { HomeIcon, ListChecksIcon, ScanSearchIcon } from "lucide-react"
+import { HomeIcon, ListChecksIcon, GlobeCheckIcon } from "lucide-react"
 
 import {
   Sidebar,
@@ -31,7 +31,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link href="/" />}>
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                <ScanSearchIcon className="size-4" />
+                <GlobeCheckIcon className="size-8" />
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
                 <span className="font-medium">Probe</span>

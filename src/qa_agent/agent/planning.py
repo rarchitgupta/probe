@@ -63,10 +63,13 @@ class TestStep(BaseModel):
 
 
 class TestSpec(BaseModel):
+    title: str = Field(min_length=1, max_length=60)
     steps: list[TestStep] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
     def validate_steps(self) -> TestSpec:
+        if len(self.title.split()) > 5:
+            raise ValueError("Title must contain at most 5 words")
         if [step.id for step in self.steps] != list(range(1, len(self.steps) + 1)):
             raise ValueError("Step IDs must be sequential, starting at 1")
         if self.steps[-1].kind != "assertion":
@@ -198,7 +201,9 @@ def sanitize_summary(summary: str, sensitive_values: set[str] | None = None) -> 
 spec_agent = Agent(
     output_type=TestSpec,
     instructions=(
-        "Compile the QA goal into the fewest ordered semantic steps. Give steps stable "
+        "Create a concise title of at most five words that identifies the behavior under "
+        "test without credentials or unnecessary details. Compile the QA goal into the "
+        "fewest ordered semantic steps. Give steps stable "
         "sequential IDs. Separate actions from assertions and make the final step an "
         "assertion of the user's requested outcome. Combine actions performed on the "
         "same page into one step and combine related final checks into one assertion "

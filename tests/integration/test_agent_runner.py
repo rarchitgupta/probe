@@ -3,18 +3,20 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
-import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx2
+import pytest
 from openai import APITimeoutError
 from pydantic_ai import ModelAPIError, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from qa_agent.agent import AgentTask
 from qa_agent.runner import execute_agent_task
+
+pytestmark = pytest.mark.browser
 
 
 class PageHandler(BaseHTTPRequestHandler):
@@ -33,7 +35,7 @@ class PageHandler(BaseHTTPRequestHandler):
         pass
 
 
-class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
+class TestAgentRunner:
     async def test_preserves_diagnostics_when_model_times_out(self) -> None:
         calls = 0
 
@@ -46,6 +48,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                         ToolCallPart(
                             info.output_tools[0].name,
                             {
+                                "title": "Fill Example Form",
                                 "steps": [
                                     {
                                         "id": 1,
@@ -57,7 +60,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
                                     },
-                                ]
+                                ],
                             },
                         )
                     ]
@@ -101,9 +104,9 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
             server.server_close()
             thread.join()
 
-        self.assertEqual(result.error, "Model request timed out after 60 seconds")
-        self.assertEqual(len(result.diagnostics), 1)
-        self.assertEqual(result.diagnostics[0].action, "fill")
+        assert result.error == "Model request timed out after 60 seconds"
+        assert len(result.diagnostics) == 1
+        assert result.diagnostics[0].action == "fill"
 
     async def test_runs_agent_and_writes_artifacts(self) -> None:
         calls = 0
@@ -117,6 +120,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                         ToolCallPart(
                             info.output_tools[0].name,
                             {
+                                "title": "Fill Example Form",
                                 "steps": [
                                     {
                                         "id": 1,
@@ -128,7 +132,7 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
                                     },
-                                ]
+                                ],
                             },
                         )
                     ]
@@ -189,26 +193,21 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
                     )
                 saved = json.loads((root / task.task_id / "result.json").read_text())
 
-                self.assertIsNone(result.error)
-                self.assertTrue((root / task.task_id / "screenshot.png").exists())
-                self.assertTrue((root / task.task_id / "trace.zip").exists())
+                assert result.error is None
+                assert (root / task.task_id / "screenshot.png").exists()
+                assert (root / task.task_id / "trace.zip").exists()
         finally:
             server.shutdown()
             server.server_close()
             thread.join()
 
-        self.assertEqual(result.status, "passed")
-        self.assertEqual(result.summary, "Completed all 2 test steps")
-        self.assertEqual(result.usage["requests"], 3)
-        self.assertEqual(result.diagnostics, ())
-        self.assertEqual(saved["diagnostics"], [])
-        self.assertNotIn("Ada", json.dumps(saved))
-        self.assertNotIn("London", json.dumps(saved))
-        self.assertEqual(
-            saved["evidence"], ["title_equals: expected='Form', actual='Form'"]
-        )
-        self.assertNotIn(task.goal, json.dumps(saved))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert result.status == "passed"
+        assert result.summary == "Completed all 2 test steps"
+        assert result.title == "Fill Example Form"
+        assert result.usage["requests"] == 3
+        assert result.diagnostics == ()
+        assert saved["diagnostics"] == []
+        assert "Ada" not in json.dumps(saved)
+        assert "London" not in json.dumps(saved)
+        assert saved["evidence"] == ["title_equals: expected='Form', actual='Form'"]
+        assert task.goal not in json.dumps(saved)

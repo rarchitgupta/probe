@@ -87,6 +87,7 @@ class TaskRunRecord(Base):
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(60))
     start_url: Mapped[str] = mapped_column(Text)
     goal: Mapped[str] = mapped_column(Text)
     status: Mapped[RunStatus] = mapped_column(run_status_type)

@@ -8,7 +8,7 @@ from typing import Literal, cast
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent import AgentTask, ProgressEntry
 from qa_agent.database import async_session_factory
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs.models import RunEventKind, RunEventRecord, RunStatus, TaskRunRecord
@@ -28,6 +28,7 @@ class InvalidRunTransitionError(RuntimeError):
 @dataclass(frozen=True)
 class TaskRun:
     id: str
+    title: str | None
     start_url: str
     goal: str
     status: RunStatus
@@ -36,6 +37,19 @@ class TaskRun:
     finished_at: datetime | None = None
     result: AgentTaskResult | None = None
     error: str | None = None
+    events: tuple[RunEvent, ...] = ()
+
+
+@dataclass(frozen=True)
+class RunEvent:
+    id: int
+    kind: RunEventKind
+    created_at: datetime
+    status: RunStatus | None
+    action: str | None
+    element: str | None
+    success: bool | None
+    message: str | None
 
 
 class RunStore:
@@ -95,6 +109,35 @@ class RunStore:
             ).all()
             return _task_run(record, list(events))
 
+    async def add_progress(self, run_id: str, progress: ProgressEntry) -> None:
+        async with self.sessions.begin() as session:
+            session.add(
+                RunEventRecord(
+                    run_id=run_id,
+                    kind=RunEventKind.ACTION,
+                    action=progress.action,
+                    element=progress.target,
+                    success=progress.success,
+                    message=progress.error or progress.effect,
+                )
+            )
+
+    async def list_events(self, run_id: str, *, after: int = 0) -> list[RunEvent]:
+        async with self.sessions() as session:
+            if not await session.get(TaskRunRecord, run_id):
+                raise KeyError(run_id)
+            records = (
+                await session.scalars(
+                    select(RunEventRecord)
+                    .where(
+                        RunEventRecord.run_id == run_id,
+                        RunEventRecord.id > after,
+                    )
+                    .order_by(RunEventRecord.id)
+                )
+            ).all()
+        return [_run_event(record) for record in records]
+
     async def mark_running(self, run_id: str) -> TaskRun:
         return await self._transition(
             run_id,
@@ -115,6 +158,7 @@ class RunStore:
             raise ValueError(f"{status} is not a completion status")
         usage = result.usage if result else {}
         values = {
+            "title": result.title if result else None,
             "finished_at": datetime.now(UTC),
             "final_url": result.final_url if result else None,
             "http_status": result.http_status if result else None,
@@ -221,9 +265,23 @@ def _status_event(
     )
 
 
+def _run_event(record: RunEventRecord) -> RunEvent:
+    return RunEvent(
+        id=record.id,
+        kind=record.kind,
+        created_at=record.created_at,
+        status=record.status,
+        action=record.action,
+        element=record.element,
+        success=record.success,
+        message=record.message,
+    )
+
+
 def _task_run(
     record: TaskRunRecord, events: list[RunEventRecord] | None = None
 ) -> TaskRun:
+    run_events = tuple(_run_event(event) for event in events or ())
     result = None
     if record.artifact_directory:
         evidence = [
@@ -254,9 +312,11 @@ def _task_run(
             usage={key: value for key, value in usage.items() if value is not None},
             error=record.error,
             artifact_directory=record.artifact_directory,
+            title=record.title,
         )
     return TaskRun(
         id=record.id,
+        title=record.title,
         start_url=record.start_url,
         goal=record.goal,
         status=record.status,
@@ -265,4 +325,5 @@ def _task_run(
         finished_at=record.finished_at,
         result=result,
         error=record.error,
+        events=run_events,
     )
