@@ -10,7 +10,7 @@ The current implementation includes:
 - structured planning and browser actions powered by Pydantic AI and DeepSeek;
 - execution limits, origin restrictions, and deterministic assertions;
 - screenshots, Playwright traces, diagnostics, token usage, and cost reporting;
-- a persistent PostgreSQL task store and a single-worker `asyncio.Queue`.
+- PostgreSQL run state, Temporal orchestration, and a separate browser worker.
 
 ## Setup
 
@@ -33,10 +33,11 @@ docker compose up --build
 ```
 
 Probe is available at http://localhost:3000, its API at http://localhost:8000,
-and the MinIO console at http://localhost:9001. Compose runs the database
-migration and creates the private artifact bucket before starting the API. Set
-`PROBE_CONTAINER_DATABASE_URL` to use a remote PostgreSQL database. The
-`S3_*` variables support MinIO, Cloudflare R2, AWS S3, and compatible services.
+the MinIO console at http://localhost:9001, and the local Temporal UI at
+http://localhost:8233. Compose runs the database migration and creates the
+private artifact bucket before starting the API. Set
+`PROBE_CONTAINER_DATABASE_URL` to use a remote PostgreSQL database. The `S3_*`
+variables support MinIO, Cloudflare R2, AWS S3, and compatible services.
 
 ## Run a QA task
 
@@ -45,8 +46,8 @@ uv run probe run https://www.saucedemo.com/ \
   "Log in and verify that the inventory page loads"
 ```
 
-Use `--json` for machine-readable output. Use `--queued` to persist the task in
-PostgreSQL and execute it through the single background worker:
+Use `--json` for machine-readable output. The API uses Temporal; `--queued`
+retains the lightweight in-process queue for standalone CLI runs:
 
 ```bash
 uv run probe run https://www.saucedemo.com/ \
@@ -67,3 +68,5 @@ uv run pytest
 ```
 
 Set `PROBE_DIAGNOSTICS=true` in `.env` to retain successful action diagnostics.
+Run the Temporal worker outside Docker with
+`uv run python -m qa_agent.temporal_worker`.
