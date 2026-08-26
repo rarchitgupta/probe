@@ -110,7 +110,7 @@ export function EnvironmentForm() {
             Prefix a value with $ to read it from the Probe server environment.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="my-4">
           <FieldGroup>
             <Controller
               name="name"
