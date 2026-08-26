@@ -12,6 +12,7 @@ class ArtifactPaths:
     result: Path
     screenshot: Path
     trace: Path
+    video: Path
 
     @classmethod
     def create(cls, root: Path, task_id: str) -> ArtifactPaths:
@@ -22,6 +23,7 @@ class ArtifactPaths:
             result=run / "result.json",
             screenshot=run / "screenshot.png",
             trace=run / "trace.zip",
+            video=run / "replay.webm",
         )
 
     def write_result(self, data: dict[str, Any]) -> None:

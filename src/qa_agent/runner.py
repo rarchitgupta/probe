@@ -115,7 +115,9 @@ async def execute_agent_task(
 
     try:
         async with asyncio.timeout(guard.remaining_seconds):
-            async with BrowserSession(trace_path=artifacts.trace) as browser:
+            async with BrowserSession(
+                trace_path=artifacts.trace, video_path=artifacts.video
+            ) as browser:
                 execution_started = perf_counter()
                 try:
                     start_url = str(task.start_url)

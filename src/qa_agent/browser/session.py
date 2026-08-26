@@ -83,8 +83,9 @@ class ActionResult:
 class BrowserSession:
     """One isolated browser context, reusable for a complete QA task."""
 
-    def __init__(self, *, trace_path: Path) -> None:
+    def __init__(self, *, trace_path: Path, video_path: Path | None = None) -> None:
         self.trace_path = trace_path
+        self.video_path = video_path
         self.console_errors: list[str] = []
         self.failed_requests: list[str] = []
         self.dialog_messages: list[str] = []
@@ -97,7 +98,12 @@ class BrowserSession:
     async def __aenter__(self) -> BrowserSession:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch()
-        self._context = await self._browser.new_context()
+        self._context = await self._browser.new_context(
+            record_video_dir=self.video_path.parent if self.video_path else None,
+            record_video_size={"width": 800, "height": 450}
+            if self.video_path
+            else None,
+        )
         await self._context.tracing.start(screenshots=True, snapshots=True)
         self.page = await self._context.new_page()
         self.page.on("console", self._record_console_error)
@@ -112,9 +118,13 @@ class BrowserSession:
         traceback: TracebackType | None,
     ) -> None:
         self._element_refs.clear()
+        video = self.page.video if self.page else None
         if self._context:
             await self._context.tracing.stop(path=self.trace_path)
             await self._context.close()
+        if video and self.video_path:
+            recorded_path = Path(await video.path())
+            recorded_path.replace(self.video_path)
         if self._browser:
             await self._browser.close()
         if self._playwright:

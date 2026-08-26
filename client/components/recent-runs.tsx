@@ -13,7 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useRuns } from "@/lib/runs"
+import { runTitle, useRuns } from "@/lib/runs"
 
 export function RecentRuns() {
   const runs = useRuns()
@@ -68,7 +68,7 @@ export function RecentRuns() {
               >
                 <div className="min-w-0 space-y-1">
                   <p className="truncate text-sm font-medium">
-                    {run.title ?? "Preparing run…"}
+                    {runTitle(run)}
                   </p>
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <LinkIcon className="size-3.5 shrink-0" />

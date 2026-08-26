@@ -147,3 +147,16 @@ class RunEventRecord(Base):
     element: Mapped[str | None] = mapped_column(Text)
     success: Mapped[bool | None] = mapped_column(Boolean)
     message: Mapped[str | None] = mapped_column(Text)
+
+
+class RunArtifactRecord(Base):
+    __tablename__ = "run_artifacts"
+    __table_args__ = (Index("ix_run_artifacts_run_id", "run_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(32))
+    path: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(String(100))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)

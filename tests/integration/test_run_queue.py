@@ -89,6 +89,31 @@ class TestRunQueueService:
         finally:
             await service.close()
 
+    async def test_cancels_active_run_and_continues(self, run_store: RunStore) -> None:
+        first_started = asyncio.Event()
+
+        async def execute(task: AgentTask) -> AgentTaskResult:
+            if task.task_id == "run-1":
+                first_started.set()
+                await asyncio.Event().wait()
+            return passed_result(task)
+
+        service = RunQueueService(run_store, execute)
+        await service.start()
+        try:
+            await service.submit(_task("run-1"))
+            await first_started.wait()
+
+            cancelled = await service.cancel("run-1")
+            await service.submit(_task("run-2"))
+            await service.join()
+
+            assert cancelled.status == RunStatus.CANCELLED
+            assert (await _run(service, "run-1")).status == RunStatus.CANCELLED
+            assert (await _run(service, "run-2")).status == RunStatus.PASSED
+        finally:
+            await service.close()
+
 
 def _task(task_id: str) -> AgentTask:
     return AgentTask(

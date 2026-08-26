@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 const API_URL = process.env.NEXT_PUBLIC_PROBE_API_URL ?? "http://127.0.0.1:8000"
@@ -50,6 +51,15 @@ export type RunStats = {
   failed_action_count: number
 }
 
+export type RunArtifact = {
+  id: string
+  kind: string
+  content_type: string
+  size_bytes: number
+  created_at: string
+  url: string
+}
+
 export type Run = {
   id: string
   title: string | null
@@ -60,6 +70,7 @@ export type Run = {
   started_at: string | null
   finished_at: string | null
   stats: RunStats
+  artifacts: RunArtifact[]
   result: RunResult | null
   error: string | null
   failure_category: FailureCategory | null
@@ -86,6 +97,15 @@ export type RunEvent = {
   element: string | null
   success: boolean | null
   message: string | null
+}
+
+export function runTitle(run: Pick<Run, "title" | "status">) {
+  if (run.title) return run.title
+  return run.status === "cancelled" ? "Cancelled run" : "Preparing run…"
+}
+
+export function artifactUrl(artifact: RunArtifact) {
+  return new URL(artifact.url, API_URL).toString()
 }
 
 async function responseJson<T>(response: Response): Promise<T> {
@@ -117,6 +137,22 @@ export async function getRunEvents(runId: string): Promise<RunEvent[]> {
   return responseJson(await fetch(`${API_URL}/runs/${runId}/events`))
 }
 
+export async function cancelRun(runId: string): Promise<Run> {
+  return responseJson(
+    await fetch(`${API_URL}/runs/${runId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "cancelled" }),
+    })
+  )
+}
+
+export async function rerunRun(runId: string): Promise<Run> {
+  return responseJson(
+    await fetch(`${API_URL}/runs/${runId}/reruns`, { method: "POST" })
+  )
+}
+
 export function useCreateRun() {
   const queryClient = useQueryClient()
 
@@ -134,30 +170,89 @@ export function useRun(runId: string | null) {
     queryKey: ["runs", runId],
     queryFn: () => getRun(runId!),
     enabled: runId !== null,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === "queued" || status === "running" ? 2000 : false
-    },
   })
 }
 
 export function useRuns() {
-  return useQuery({
+  const queryClient = useQueryClient()
+  const query = useQuery({
     queryKey: ["runs"],
     queryFn: getRuns,
-    refetchInterval: (query) =>
-      query.state.data?.some(
-        (run) => run.status === "queued" || run.status === "running"
-      )
-        ? 2000
-        : false,
   })
+
+  useEffect(() => {
+    const source = new EventSource(`${API_URL}/runs/stream`)
+    source.addEventListener("runs", (event) => {
+      queryClient.setQueryData<RunListItem[]>(
+        ["runs"],
+        JSON.parse(event.data) as RunListItem[]
+      )
+    })
+    return () => source.close()
+  }, [queryClient])
+
+  return query
 }
 
-export function useRunEvents(runId: string, status?: RunStatus) {
+export function useRunEvents(runId: string) {
   return useQuery({
     queryKey: ["runs", runId, "events"],
     queryFn: () => getRunEvents(runId),
-    refetchInterval: status === "queued" || status === "running" ? 1000 : false,
+  })
+}
+
+export function useRunStream(runId: string) {
+  const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const source = new EventSource(`${API_URL}/runs/${runId}/stream`)
+
+    source.addEventListener("run", (event) => {
+      const run = JSON.parse(event.data) as Run
+      queryClient.setQueryData(["runs", runId], run)
+      queryClient.setQueryData<RunListItem[]>(["runs"], (runs) =>
+        runs?.map((item) => (item.id === run.id ? { ...item, ...run } : item))
+      )
+      if (run.status !== "queued" && run.status !== "running") source.close()
+    })
+    source.addEventListener("progress", (event) => {
+      const progress = JSON.parse(event.data) as RunEvent
+      queryClient.setQueryData<RunEvent[]>(
+        ["runs", runId, "events"],
+        (events = []) =>
+          events.some((item) => item.id === progress.id)
+            ? events
+            : [...events, progress]
+      )
+    })
+
+    return () => source.close()
+  }, [queryClient, runId])
+}
+
+export function useCancelRun() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: cancelRun,
+    onSuccess: (run) => {
+      queryClient.setQueryData(["runs", run.id], run)
+      void queryClient.invalidateQueries({ queryKey: ["runs"], exact: true })
+      void queryClient.invalidateQueries({
+        queryKey: ["runs", run.id, "events"],
+      })
+    },
+  })
+}
+
+export function useRerun() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: rerunRun,
+    onSuccess: (run) => {
+      queryClient.setQueryData(["runs", run.id], run)
+      void queryClient.invalidateQueries({ queryKey: ["runs"], exact: true })
+    },
   })
 }

@@ -56,7 +56,8 @@ model or prompt configurations across a small set of meaningful SauceDemo flows.
 Use benchmark failures—not speculation—to choose the next browser capabilities.
 
 - [x] Add stable failure categories and prompt/model configuration versioning.
-- [ ] Add cancellation, reruns, and Server-Sent Events for one-way live progress.
+- [x] Add cancellation and reruns for queued, running, and completed tasks.
+- [x] Replace frontend polling with Server-Sent Events for one-way live progress.
 - [ ] Add optional video replay and preserve screenshots/Playwright traces as
   evidence.
 - [ ] Add reusable environment inputs for headers, cookies, viewport, and secret

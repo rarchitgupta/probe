@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Literal, cast
+from uuid import uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -13,7 +15,13 @@ from qa_agent.configuration import AgentConfiguration
 from qa_agent.database import async_session_factory
 from qa_agent.failures import FailureCategory
 from qa_agent.runner import AgentTaskResult
-from qa_agent.runs.models import RunEventKind, RunEventRecord, RunStatus, TaskRunRecord
+from qa_agent.runs.models import (
+    RunArtifactRecord,
+    RunEventKind,
+    RunEventRecord,
+    RunStatus,
+    TaskRunRecord,
+)
 
 TERMINAL_STATUSES = {
     RunStatus.PASSED,
@@ -41,6 +49,18 @@ class TaskRun:
     error: str | None = None
     failure_category: FailureCategory | None = None
     events: tuple[RunEvent, ...] = ()
+    artifacts: tuple[RunArtifact, ...] = ()
+
+
+@dataclass(frozen=True)
+class RunArtifact:
+    id: str
+    run_id: str
+    kind: str
+    path: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -110,7 +130,19 @@ class RunStore:
                     .order_by(RunEventRecord.id)
                 )
             ).all()
-            return _task_run(record, list(events))
+            artifacts = (
+                await session.scalars(
+                    select(RunArtifactRecord)
+                    .where(RunArtifactRecord.run_id == run_id)
+                    .order_by(RunArtifactRecord.created_at, RunArtifactRecord.id)
+                )
+            ).all()
+            return _task_run(record, list(events), list(artifacts))
+
+    async def get_artifact(self, run_id: str, artifact_id: str) -> RunArtifact | None:
+        async with self.sessions() as session:
+            record = await session.get(RunArtifactRecord, artifact_id)
+            return _run_artifact(record) if record and record.run_id == run_id else None
 
     async def add_progress(self, run_id: str, progress: ProgressEntry) -> None:
         async with self.sessions.begin() as session:
@@ -194,6 +226,7 @@ class RunStore:
             "request_count": usage.get("requests"),
             "cost": Decimal(str(usage["cost"])) if usage.get("cost") else None,
         }
+        video = _video_artifact(run_id, result)
         async with self.sessions.begin() as session:
             record = await self._update(
                 session, run_id, RunStatus.RUNNING, status, values
@@ -212,12 +245,14 @@ class RunStore:
                 )
                 for evidence in (result.evidence if result else ())
             )
-        return _task_run(record)
+            if video:
+                session.add(video)
+        return _task_run(record, artifacts=[video] if video else None)
 
     async def cancel(self, run_id: str) -> TaskRun:
         return await self._transition(
             run_id,
-            RunStatus.QUEUED,
+            (RunStatus.QUEUED, RunStatus.RUNNING),
             RunStatus.CANCELLED,
             finished_at=datetime.now(UTC),
         )
@@ -246,7 +281,7 @@ class RunStore:
     async def _transition(
         self,
         run_id: str,
-        source: RunStatus,
+        source: RunStatus | tuple[RunStatus, ...],
         target: RunStatus,
         **values: object,
     ) -> TaskRun:
@@ -259,13 +294,18 @@ class RunStore:
     async def _update(
         session: AsyncSession,
         run_id: str,
-        source: RunStatus,
+        source: RunStatus | tuple[RunStatus, ...],
         target: RunStatus,
         values: dict[str, object],
     ) -> TaskRunRecord:
+        source_condition = (
+            TaskRunRecord.status.in_(source)
+            if isinstance(source, tuple)
+            else TaskRunRecord.status == source
+        )
         result = await session.execute(
             update(TaskRunRecord)
-            .where(TaskRunRecord.id == run_id, TaskRunRecord.status == source)
+            .where(TaskRunRecord.id == run_id, source_condition)
             .values(status=target, **values)
             .returning(TaskRunRecord)
         )
@@ -302,7 +342,9 @@ def _run_event(record: RunEventRecord) -> RunEvent:
 
 
 def _task_run(
-    record: TaskRunRecord, events: list[RunEventRecord] | None = None
+    record: TaskRunRecord,
+    events: list[RunEventRecord] | None = None,
+    artifacts: list[RunArtifactRecord] | None = None,
 ) -> TaskRun:
     run_events = tuple(_run_event(event) for event in events or ())
     result = None
@@ -361,4 +403,35 @@ def _task_run(
         error=record.error,
         failure_category=record.failure_category,
         events=run_events,
+        artifacts=tuple(_run_artifact(artifact) for artifact in artifacts or ()),
+    )
+
+
+def _video_artifact(
+    run_id: str, result: AgentTaskResult | None
+) -> RunArtifactRecord | None:
+    if not result:
+        return None
+    path = Path(result.artifact_directory) / "replay.webm"
+    if not path.is_file():
+        return None
+    return RunArtifactRecord(
+        id=uuid4().hex,
+        run_id=run_id,
+        kind="video",
+        path=str(path),
+        content_type="video/webm",
+        size_bytes=path.stat().st_size,
+    )
+
+
+def _run_artifact(record: RunArtifactRecord) -> RunArtifact:
+    return RunArtifact(
+        id=record.id,
+        run_id=record.run_id,
+        kind=record.kind,
+        path=record.path,
+        content_type=record.content_type,
+        size_bytes=record.size_bytes,
+        created_at=record.created_at,
     )

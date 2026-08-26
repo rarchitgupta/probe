@@ -213,6 +213,7 @@ class TestAgentRunner:
                 assert trial.error is None
                 assert (run_directory / "screenshot.png").exists()
                 assert (run_directory / "trace.zip").exists()
+                assert (run_directory / "replay.webm").stat().st_size > 0
         finally:
             server.shutdown()
             server.server_close()

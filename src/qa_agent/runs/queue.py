@@ -4,9 +4,9 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent import AgentTask, ProgressEntry
 from qa_agent.runner import AgentTaskResult, execute_agent_task
-from qa_agent.runs.store import RunEvent, RunStatus, RunStore, TaskRun
+from qa_agent.runs.store import RunArtifact, RunEvent, RunStatus, RunStore, TaskRun
 
 RunExecutor = Callable[[AgentTask], Awaitable[AgentTaskResult]]
 
@@ -22,6 +22,24 @@ class RunQueueService:
         self.executor = executor
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task[None] | None = None
+        self._active_run_id: str | None = None
+        self._active_task: asyncio.Task[None] | None = None
+        self._updates = asyncio.Condition()
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        return self._version
+
+    async def wait_for_update(self, version: int, timeout: float = 15) -> int | None:
+        async with self._updates:
+            try:
+                await asyncio.wait_for(
+                    self._updates.wait_for(lambda: self._version > version), timeout
+                )
+            except TimeoutError:
+                return None
+            return self._version
 
     async def start(self) -> None:
         if self._worker:
@@ -35,6 +53,7 @@ class RunQueueService:
             raise RuntimeError("RunQueueService must be started before submission")
         run = await self.store.create(task)
         await self._queue.put(run.id)
+        await self._publish()
         return run
 
     async def get(self, run_id: str) -> TaskRun | None:
@@ -55,6 +74,21 @@ class RunQueueService:
     async def list_events(self, run_id: str, *, after: int = 0) -> list[RunEvent]:
         return await self.store.list_events(run_id, after=after)
 
+    async def get_artifact(self, run_id: str, artifact_id: str) -> RunArtifact | None:
+        return await self.store.get_artifact(run_id, artifact_id)
+
+    async def cancel(self, run_id: str) -> TaskRun:
+        run = await self.store.get(run_id)
+        if not run:
+            raise KeyError(run_id)
+        if self._active_run_id == run_id and self._active_task:
+            self._active_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._active_task
+        run = await self.store.cancel(run_id)
+        await self._publish()
+        return run
+
     async def join(self) -> None:
         await self._queue.join()
 
@@ -70,9 +104,18 @@ class RunQueueService:
     async def _work(self) -> None:
         while True:
             run_id = await self._queue.get()
+            execution = asyncio.create_task(
+                self._execute(run_id), name=f"probe-run-{run_id}"
+            )
+            self._active_run_id = run_id
+            self._active_task = execution
             try:
-                await self._execute(run_id)
+                await execution
+            except asyncio.CancelledError:
+                pass
             finally:
+                self._active_run_id = None
+                self._active_task = None
                 self._queue.task_done()
 
     async def _execute(self, run_id: str) -> None:
@@ -80,6 +123,7 @@ class RunQueueService:
         if not run or run.status != RunStatus.QUEUED:
             return
         await self.store.mark_running(run_id)
+        await self._publish()
         task = AgentTask(task_id=run.id, start_url=run.start_url, goal=run.goal)
         try:
             result = (
@@ -87,7 +131,7 @@ class RunQueueService:
                 if self.executor
                 else await execute_agent_task(
                     task,
-                    event_handler=lambda event: self.store.add_progress(run_id, event),
+                    event_handler=lambda event: self._add_progress(run_id, event),
                 )
             )
         except Exception as exc:
@@ -96,6 +140,7 @@ class RunQueueService:
                 RunStatus.ERROR,
                 error=f"{type(exc).__name__}: {exc}",
             )
+            await self._publish()
             return
         await self.store.finish(
             run_id,
@@ -103,3 +148,13 @@ class RunQueueService:
             result=result,
             error=result.error,
         )
+        await self._publish()
+
+    async def _add_progress(self, run_id: str, event: ProgressEntry) -> None:
+        await self.store.add_progress(run_id, event)
+        await self._publish()
+
+    async def _publish(self) -> None:
+        async with self._updates:
+            self._version += 1
+            self._updates.notify_all()
