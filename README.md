@@ -10,7 +10,7 @@ The current implementation includes:
 - structured planning and browser actions powered by Pydantic AI and DeepSeek;
 - execution limits, origin restrictions, and deterministic assertions;
 - screenshots, Playwright traces, diagnostics, token usage, and cost reporting;
-- a persistent SQLite task store and a single-worker `asyncio.Queue`.
+- a persistent PostgreSQL task store and a single-worker `asyncio.Queue`.
 
 ## Setup
 
@@ -18,10 +18,25 @@ The current implementation includes:
 uv sync
 uv run playwright install chromium
 cp .env.example .env
+docker compose up -d postgres
 uv run alembic upgrade head
 ```
 
 Add your `DEEPSEEK_API_KEY` to `.env`. Langfuse configuration is optional.
+
+## Docker
+
+Start the complete production-style stack:
+
+```bash
+docker compose up --build
+```
+
+Probe is available at http://localhost:3000, its API at http://localhost:8000,
+and the MinIO console at http://localhost:9001. Compose runs the database
+migration and creates the private artifact bucket before starting the API. Set
+`PROBE_CONTAINER_DATABASE_URL` to use a remote PostgreSQL database. The
+`S3_*` variables support MinIO, Cloudflare R2, AWS S3, and compatible services.
 
 ## Run a QA task
 
@@ -31,7 +46,7 @@ uv run probe run https://www.saucedemo.com/ \
 ```
 
 Use `--json` for machine-readable output. Use `--queued` to persist the task in
-SQLite and execute it through the single background worker:
+PostgreSQL and execute it through the single background worker:
 
 ```bash
 uv run probe run https://www.saucedemo.com/ \
@@ -39,24 +54,16 @@ uv run probe run https://www.saucedemo.com/ \
   --queued --json
 ```
 
-Run artifacts are written to `.runs/<task-id>/`. Queued task state is stored in
-`.probe/probe.db` by default.
-
-## Inspect a page
-
-```bash
-uv run probe inspect https://example.com
-```
-
-This records the page's compact semantic controls, screenshot, console and
-network failures, and Playwright trace without invoking an LLM.
+Run artifacts are written to `.runs/<task-id>/`. Local task state is stored in
+the PostgreSQL service from `compose.yaml`. Set `PROBE_DATABASE_URL` to an async
+SQLAlchemy URL for a remote PostgreSQL instance when deployed.
 
 ## Development
 
 ```bash
 uv run ruff check src tests
 uv run ty check src tests
-uv run python -m unittest discover -s tests -v
+uv run pytest
 ```
 
 Set `PROBE_DIAGNOSTICS=true` in `.env` to retain successful action diagnostics.

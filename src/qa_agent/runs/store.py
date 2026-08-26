@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -11,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.artifacts import ArtifactStorage, artifact_storage
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.database import async_session_factory
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
@@ -24,6 +26,8 @@ from qa_agent.runs.models import (
     TaskRunRecord,
     TestEnvironmentRecord,
 )
+
+logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = {
     RunStatus.PASSED,
@@ -60,6 +64,7 @@ class RunArtifact:
     id: str
     run_id: str
     kind: str
+    storage: str
     path: str
     content_type: str
     size_bytes: int
@@ -82,8 +87,10 @@ class RunStore:
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession] = async_session_factory,
+        artifacts: ArtifactStorage | None = None,
     ) -> None:
         self.sessions = sessions
+        self.artifacts = artifacts or artifact_storage()
 
     async def create(self, task: AgentTask) -> TaskRun:
         record = TaskRunRecord(
@@ -95,6 +102,7 @@ class RunStore:
         )
         async with self.sessions.begin() as session:
             session.add(record)
+            await session.flush()
             session.add(_status_event(record.id, RunStatus.QUEUED))
         return _task_run(record)
 
@@ -263,7 +271,7 @@ class RunStore:
             "request_count": usage.get("requests"),
             "cost": Decimal(str(usage["cost"])) if usage.get("cost") else None,
         }
-        video = _video_artifact(run_id, result)
+        video = await self._video_artifact(run_id, result)
         async with self.sessions.begin() as session:
             record = await self._update(
                 session, run_id, RunStatus.RUNNING, status, values
@@ -285,6 +293,31 @@ class RunStore:
             if video:
                 session.add(video)
         return _task_run(record, artifacts=[video] if video else None)
+
+    async def _video_artifact(
+        self, run_id: str, result: AgentTaskResult | None
+    ) -> RunArtifactRecord | None:
+        if not result:
+            return None
+        path = Path(result.artifact_directory) / "replay.webm"
+        if not path.is_file():
+            return None
+        try:
+            stored = await self.artifacts.store(
+                path, f"runs/{run_id}/replay.webm", "video/webm"
+            )
+        except Exception:
+            logger.exception("Failed to store replay for run %s", run_id)
+            return None
+        return RunArtifactRecord(
+            id=uuid4().hex,
+            run_id=run_id,
+            kind="video",
+            storage=stored.storage,
+            path=stored.key,
+            content_type="video/webm",
+            size_bytes=stored.size_bytes,
+        )
 
     async def cancel(self, run_id: str) -> TaskRun:
         return await self._transition(
@@ -445,29 +478,12 @@ def _task_run(
     )
 
 
-def _video_artifact(
-    run_id: str, result: AgentTaskResult | None
-) -> RunArtifactRecord | None:
-    if not result:
-        return None
-    path = Path(result.artifact_directory) / "replay.webm"
-    if not path.is_file():
-        return None
-    return RunArtifactRecord(
-        id=uuid4().hex,
-        run_id=run_id,
-        kind="video",
-        path=str(path),
-        content_type="video/webm",
-        size_bytes=path.stat().st_size,
-    )
-
-
 def _run_artifact(record: RunArtifactRecord) -> RunArtifact:
     return RunArtifact(
         id=record.id,
         run_id=record.run_id,
         kind=record.kind,
+        storage=record.storage,
         path=record.path,
         content_type=record.content_type,
         size_bytes=record.size_bytes,

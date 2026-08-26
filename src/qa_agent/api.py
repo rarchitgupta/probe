@@ -8,11 +8,12 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy.exc import IntegrityError
 
 from qa_agent.agent import AgentTask
+from qa_agent.artifacts import artifact_storage
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.failures import FailureCategory
 from qa_agent.runs import (
@@ -140,6 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     queue = RunQueueService(RunStore())
     await queue.start()
     app.state.run_queue = queue
+    app.state.artifact_storage = artifact_storage()
     try:
         yield
     finally:
@@ -162,6 +164,11 @@ STREAM_TERMINAL_STATUSES = {
     RunStatus.ERROR,
     RunStatus.CANCELLED,
 }
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.post(
@@ -291,12 +298,15 @@ async def get_run(run_id: str, request: Request) -> RunResponse:
 @app.get("/runs/{run_id}/artifacts/{artifact_id}/content")
 async def get_artifact_content(
     run_id: str, artifact_id: str, request: Request
-) -> FileResponse:
+) -> Response:
     queue: RunQueueService = request.app.state.run_queue
     run = await queue.get(run_id)
     artifact = await queue.get_artifact(run_id, artifact_id)
     if not run or not run.result or not artifact:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
+    storage = artifact_storage(artifact.storage)
+    if url := storage.signed_url(artifact.path):
+        return RedirectResponse(url)
     run_directory = Path(run.result.artifact_directory).resolve()
     path = Path(artifact.path).resolve()
     if not path.is_relative_to(run_directory) or not path.is_file():

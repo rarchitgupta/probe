@@ -174,6 +174,7 @@ class TestCreateRun:
                     id="artifact-1",
                     run_id="run-2",
                     kind="video",
+                    storage="local",
                     path=str(video),
                     content_type="video/webm",
                     size_bytes=video.stat().st_size,
