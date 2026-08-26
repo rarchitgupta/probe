@@ -97,8 +97,10 @@ execution system is enough.
   browser crashes, token usage, and cost.
 - [x] Containerize the backend, frontend, and Playwright worker with pinned versions.
 - [x] Provide Docker Compose for local production-like deployment.
-- [ ] Deploy the API and workers to Kubernetes with health checks, resource limits,
-  graceful shutdown, and queue-based autoscaling.
+- [x] Provide a repeatable local kind deployment with separate API and worker
+  workloads, health checks, resource limits, graceful shutdown, and setup Jobs.
+- [ ] Add queue-based worker autoscaling only if Probe is deployed beyond local
+  development.
 - [ ] Add object-retention cleanup, backup/restore notes, and short operational
   runbooks for model, browser, database, and worker failures.
 

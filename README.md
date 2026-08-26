@@ -39,6 +39,32 @@ private artifact bucket before starting the API. Set
 `PROBE_CONTAINER_DATABASE_URL` to use a remote PostgreSQL database. The `S3_*`
 variables support MinIO, Cloudflare R2, AWS S3, and compatible services.
 
+## Local Kubernetes
+
+Run the same services in a local [kind](https://kind.sigs.k8s.io/) cluster with
+plain Kustomize manifests:
+
+```bash
+./scripts/kind-up.sh
+```
+
+The script builds and loads the local images, creates the application secret
+from `.env`, starts PostgreSQL, MinIO, and Temporal, runs database and bucket
+setup Jobs, and then deploys the API, one browser worker, and the client. It
+requires Docker, kind, kubectl, and ripgrep.
+
+Services remain private to the cluster. Forward only the ones you need:
+
+```bash
+kubectl -n probe port-forward service/probe-client 3000:3000
+kubectl -n probe port-forward service/probe-api 8000:8000
+kubectl -n probe port-forward service/minio 9000:9000 9001:9001
+kubectl -n probe port-forward service/temporal 8233:8233
+```
+
+Inspect pods with `kubectl -n probe get pods` and remove the entire local
+cluster, including its persistent volumes, with `./scripts/kind-down.sh`.
+
 ## Run a QA task
 
 ```bash
