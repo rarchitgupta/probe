@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: probe-worker
+  template:
+    metadata:
+      labels:
+        app: probe-worker
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: worker
+          image: probe-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "qa_agent.temporal_worker"]
+          envFrom:
+            - configMapRef:
+                name: probe-config
+          env:
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: LANGFUSE_PUBLIC_KEY
+                  optional: true
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: LANGFUSE_SECRET_KEY
+                  optional: true
+            - name: LANGFUSE_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: LANGFUSE_BASE_URL
+                  optional: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: run-staging
+              mountPath: /app/.runs
+            - name: browser-shared-memory
+              mountPath: /dev/shm
+      volumes:
+        - name: run-staging
+          emptyDir: {}
+        - name: browser-shared-memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

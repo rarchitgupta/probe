@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from qa_agent.artifacts import LocalArtifactStorage
 from qa_agent.database import Base
 from qa_agent.runs import RunStore
 
@@ -14,5 +15,7 @@ async def run_store(tmp_path: Path) -> AsyncIterator[RunStore]:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    yield RunStore(async_sessionmaker(engine, expire_on_commit=False))
+    yield RunStore(
+        async_sessionmaker(engine, expire_on_commit=False), LocalArtifactStorage()
+    )
     await engine.dispose()

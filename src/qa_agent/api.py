@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -19,10 +20,11 @@ from qa_agent.failures import FailureCategory
 from qa_agent.runs import (
     InvalidRunTransitionError,
     RunEventKind,
-    RunQueueService,
+    RunService,
     RunStatus,
     RunStore,
     TaskRun,
+    TemporalRunService,
 )
 
 
@@ -138,14 +140,14 @@ class RunEventResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    queue = RunQueueService(RunStore())
-    await queue.start()
-    app.state.run_queue = queue
+    service = await TemporalRunService.connect(RunStore())
+    await service.start()
+    app.state.run_service = service
     app.state.artifact_storage = artifact_storage()
     try:
         yield
     finally:
-        await queue.close()
+        await service.close()
 
 
 app = FastAPI(title="Probe", lifespan=lifespan)
@@ -179,9 +181,9 @@ async def health() -> dict[str, str]:
 async def create_environment(
     payload: CreateEnvironmentRequest, request: Request
 ) -> EnvironmentResponse:
-    queue: RunQueueService = request.app.state.run_queue
+    service: RunService = request.app.state.run_service
     try:
-        environment = await queue.create_environment(**payload.model_dump())
+        environment = await service.create_environment(**payload.model_dump())
     except IntegrityError:
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Environment name already exists"
@@ -191,10 +193,10 @@ async def create_environment(
 
 @app.get("/environments", response_model=list[EnvironmentResponse])
 async def list_environments(request: Request) -> list[EnvironmentResponse]:
-    queue: RunQueueService = request.app.state.run_queue
+    service: RunService = request.app.state.run_service
     return [
         _environment_response(environment)
-        for environment in await queue.list_environments()
+        for environment in await service.list_environments()
     ]
 
 
@@ -202,12 +204,12 @@ async def list_environments(request: Request) -> list[EnvironmentResponse]:
 async def create_run(
     payload: CreateRunRequest, request: Request, response: Response
 ) -> RunResponse:
-    queue: RunQueueService = request.app.state.run_queue
-    if payload.environment_id and not await queue.get_environment(
+    service: TemporalRunService = request.app.state.run_service
+    if payload.environment_id and not await service.get_environment(
         payload.environment_id
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Environment not found")
-    run = await queue.submit(
+    run = await service.submit(
         AgentTask(
             start_url=payload.start_url,
             goal=payload.goal,
@@ -225,71 +227,82 @@ async def list_runs(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> list[RunListItem]:
-    queue: RunQueueService = request.app.state.run_queue
-    runs = await queue.list_runs(status=status_filter, limit=limit, offset=offset)
+    service: RunService = request.app.state.run_service
+    runs = await service.list_runs(status=status_filter, limit=limit, offset=offset)
     return [RunListItem.model_validate(run) for run in runs]
 
 
 @app.get("/runs/stream")
 async def stream_runs(request: Request) -> StreamingResponse:
-    queue: RunQueueService = request.app.state.run_queue
+    service: RunService = request.app.state.run_service
 
     async def events() -> AsyncGenerator[str, None]:
-        version = -1
+        previous = ""
+        idle_polls = 0
         while not await request.is_disconnected():
-            if version != queue.version:
-                observed_version = queue.version
-                runs = await queue.list_runs(limit=100)
-                payload = (
-                    "["
-                    + ",".join(
-                        RunListItem.model_validate(run).model_dump_json()
-                        for run in runs
-                    )
-                    + "]"
+            runs = await service.list_runs(limit=100)
+            payload = (
+                "["
+                + ",".join(
+                    RunListItem.model_validate(run).model_dump_json() for run in runs
                 )
+                + "]"
+            )
+            if payload != previous:
                 yield _sse("runs", payload)
-                version = observed_version
-            if await queue.wait_for_update(version) is None:
+                previous = payload
+                idle_polls = 0
+            else:
+                idle_polls += 1
+            if idle_polls >= 15:
                 yield ": keep-alive\n\n"
+                idle_polls = 0
+            await asyncio.sleep(1)
 
     return _streaming_response(events())
 
 
 @app.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str, request: Request) -> StreamingResponse:
-    queue: RunQueueService = request.app.state.run_queue
-    if not await queue.get(run_id):
+    service: RunService = request.app.state.run_service
+    if not await service.get(run_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found")
     last_event_id = request.headers.get("last-event-id", "0")
     after = int(last_event_id) if last_event_id.isdigit() else 0
 
     async def events() -> AsyncGenerator[str, None]:
         nonlocal after
-        version = -1
+        previous = ""
+        idle_polls = 0
         while not await request.is_disconnected():
-            observed_version = queue.version
-            run = await queue.get_details(run_id)
+            run = await service.get_details(run_id)
             if not run:
                 return
-            for event in await queue.list_events(run_id, after=after):
+            for event in await service.list_events(run_id, after=after):
                 payload = RunEventResponse.model_validate(event).model_dump_json()
                 yield _sse("progress", payload, event.id)
                 after = event.id
-            yield _sse("run", _run_response(run).model_dump_json())
+            payload = _run_response(run).model_dump_json()
+            if payload != previous:
+                yield _sse("run", payload)
+                previous = payload
+                idle_polls = 0
+            else:
+                idle_polls += 1
             if run.status in STREAM_TERMINAL_STATUSES:
                 return
-            version = observed_version
-            if await queue.wait_for_update(version) is None:
+            if idle_polls >= 15:
                 yield ": keep-alive\n\n"
+                idle_polls = 0
+            await asyncio.sleep(1)
 
     return _streaming_response(events())
 
 
 @app.get("/runs/{run_id}", response_model=RunResponse)
 async def get_run(run_id: str, request: Request) -> RunResponse:
-    queue: RunQueueService = request.app.state.run_queue
-    run = await queue.get_details(run_id)
+    service: RunService = request.app.state.run_service
+    run = await service.get_details(run_id)
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found")
     return _run_response(run)
@@ -299,9 +312,9 @@ async def get_run(run_id: str, request: Request) -> RunResponse:
 async def get_artifact_content(
     run_id: str, artifact_id: str, request: Request
 ) -> Response:
-    queue: RunQueueService = request.app.state.run_queue
-    run = await queue.get(run_id)
-    artifact = await queue.get_artifact(run_id, artifact_id)
+    service: RunService = request.app.state.run_service
+    run = await service.get(run_id)
+    artifact = await service.get_artifact(run_id, artifact_id)
     if not run or not run.result or not artifact:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
     storage = artifact_storage(artifact.storage)
@@ -322,9 +335,9 @@ async def get_artifact_content(
 async def update_run(
     run_id: str, payload: UpdateRunRequest, request: Request
 ) -> RunResponse:
-    queue: RunQueueService = request.app.state.run_queue
+    service: TemporalRunService = request.app.state.run_service
     try:
-        run = await queue.cancel(run_id)
+        run = await service.cancel(run_id)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found") from None
     except InvalidRunTransitionError:
@@ -340,13 +353,13 @@ async def update_run(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def rerun(run_id: str, request: Request, response: Response) -> RunResponse:
-    queue: RunQueueService = request.app.state.run_queue
-    source = await queue.get(run_id)
+    service: TemporalRunService = request.app.state.run_service
+    source = await service.get(run_id)
     if not source:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found")
     if source.status in {RunStatus.QUEUED, RunStatus.RUNNING}:
         raise HTTPException(status.HTTP_409_CONFLICT, "Run has not finished")
-    run = await queue.submit(
+    run = await service.submit(
         AgentTask(
             start_url=source.start_url,
             goal=source.goal,
@@ -363,9 +376,9 @@ async def list_run_events(
     request: Request,
     after: int = Query(default=0, ge=0),
 ) -> list[RunEventResponse]:
-    queue: RunQueueService = request.app.state.run_queue
+    service: RunService = request.app.state.run_service
     try:
-        events = await queue.list_events(run_id, after=after)
+        events = await service.list_events(run_id, after=after)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found") from None
     return [RunEventResponse.model_validate(event) for event in events]

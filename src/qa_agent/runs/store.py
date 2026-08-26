@@ -327,6 +327,16 @@ class RunStore:
             finished_at=datetime.now(UTC),
         )
 
+    async def fail_submission(self, run_id: str, error: str) -> TaskRun:
+        return await self._transition(
+            run_id,
+            RunStatus.QUEUED,
+            RunStatus.ERROR,
+            finished_at=datetime.now(UTC),
+            error=error,
+            failure_category=FailureCategory.INFRASTRUCTURE_ERROR,
+        )
+
     async def recover_pending(self) -> list[TaskRun]:
         async with self.sessions.begin() as session:
             await session.execute(
