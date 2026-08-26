@@ -1,7 +1,14 @@
-from qa_agent.runs.models import RunEventKind, RunEventRecord, RunStatus, TaskRunRecord
+from qa_agent.runs.models import (
+    RunArtifactRecord,
+    RunEventKind,
+    RunEventRecord,
+    RunStatus,
+    TaskRunRecord,
+)
 from qa_agent.runs.queue import RunQueueService
 from qa_agent.runs.store import (
     InvalidRunTransitionError,
+    RunArtifact,
     RunEvent,
     RunStore,
     TaskRun,
@@ -9,6 +16,8 @@ from qa_agent.runs.store import (
 
 __all__ = [
     "InvalidRunTransitionError",
+    "RunArtifact",
+    "RunArtifactRecord",
     "RunEventKind",
     "RunEvent",
     "RunEventRecord",

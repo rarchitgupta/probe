@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.configuration import AgentConfiguration
+from qa_agent.environments import EnvironmentDefinition
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
 
 
 class TestRunStore:
-    async def test_persists_and_transitions_a_run(self, run_store: RunStore) -> None:
+    async def test_persists_reusable_environment(self, run_store: RunStore) -> None:
+        environment = await run_store.create_environment(
+            name="Staging",
+            definition=EnvironmentDefinition(secrets={"password": "TEST_PASSWORD"}),
+            viewport_width=1024,
+            viewport_height=768,
+        )
+        await run_store.create(
+            AgentTask(
+                task_id="environment-run",
+                start_url="https://example.com",
+                goal="Verify the page",
+                environment_id=environment.id,
+            )
+        )
+
+        loaded = await run_store.get_environment(environment.id)
+        runs = await run_store.list_runs()
+
+        assert loaded == environment
+        assert [item.name for item in await run_store.list_environments()] == [
+            "Staging"
+        ]
+        assert runs[0].environment_id == environment.id
+
+    async def test_persists_and_transitions_a_run(
+        self, run_store: RunStore, tmp_path: Path
+    ) -> None:
+        run_directory = tmp_path / "run-1"
+        run_directory.mkdir()
+        (run_directory / "replay.webm").write_bytes(b"video")
         created = await run_store.create(_task())
         loaded = await run_store.get("run-1")
         running = await run_store.mark_running("run-1")
@@ -26,8 +60,9 @@ class TestRunStore:
                 diagnostics=(),
                 usage={},
                 error=None,
-                artifact_directory=".runs/run-1",
+                artifact_directory=str(run_directory),
                 title="Verify Example Page",
+                configuration=AgentConfiguration(model="test-model"),
             ),
         )
         fetched = await run_store.get_details("run-1")
@@ -40,16 +75,38 @@ class TestRunStore:
         assert (fetched.result.evidence if fetched and fetched.result else None) == (
             "Page visible",
         )
+        assert (
+            fetched.result.configuration.model
+            if fetched and fetched.result and fetched.result.configuration
+            else None
+        ) == "test-model"
+        assert fetched is not None
+        assert len(fetched.artifacts) == 1
+        assert fetched.artifacts[0].content_type == "video/webm"
+        assert fetched.artifacts[0].size_bytes == 5
+        assert (
+            await run_store.get_artifact("run-1", fetched.artifacts[0].id)
+            == fetched.artifacts[0]
+        )
         with pytest.raises(InvalidRunTransitionError):
             await run_store.mark_running("run-1")
 
-    async def test_cancels_only_queued_runs(self, run_store: RunStore) -> None:
+    async def test_rejects_cancelling_terminal_run(self, run_store: RunStore) -> None:
         await run_store.create(_task())
         cancelled = await run_store.cancel("run-1")
 
         assert cancelled.status == RunStatus.CANCELLED
         with pytest.raises(InvalidRunTransitionError):
             await run_store.cancel("run-1")
+
+    async def test_cancels_running_run(self, run_store: RunStore) -> None:
+        await run_store.create(_task())
+        await run_store.mark_running("run-1")
+
+        cancelled = await run_store.cancel("run-1")
+
+        assert cancelled.status == RunStatus.CANCELLED
+        assert cancelled.finished_at is not None
 
     async def test_lists_newest_runs_with_status_filter(
         self, run_store: RunStore

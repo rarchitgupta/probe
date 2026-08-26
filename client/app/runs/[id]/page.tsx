@@ -2,10 +2,11 @@
 
 import { use } from "react"
 
-import { useRun, useRunEvents } from "@/lib/runs"
+import { useRun, useRunEvents, useRunStream } from "@/lib/runs"
 import { RunHeader } from "@/components/run-header"
 import { RunMetrics, RunOverview } from "@/components/run-overview"
 import { RunResults } from "@/components/run-results"
+import { RunReplay } from "@/components/run-replay"
 import { RunEvents } from "@/components/run-events"
 import {
   Card,
@@ -24,7 +25,8 @@ export default function RunPage({
 }) {
   const { id } = use(params)
   const runQuery = useRun(id)
-  const eventsQuery = useRunEvents(id, runQuery.data?.status)
+  const eventsQuery = useRunEvents(id)
+  useRunStream(id)
 
   if (runQuery.isPending) {
     return (
@@ -53,14 +55,14 @@ export default function RunPage({
       <RunOverview run={run} />
       <RunMetrics run={run} />
 
-      <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
-        <Card className="min-w-0">
+      <section className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
+        <Card className="min-w-0 lg:h-[60dvh]">
           <CardHeader>
             <CardTitle>Events</CardTitle>
             <CardDescription>Live progress from this run</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="lg:h-[60dvh]">
+          <CardContent className="min-h-0 flex-1">
+            <ScrollArea className="h-full">
               <div className="p-8">
                 {eventsQuery.isPending && <p>Loading events...</p>}
                 {eventsQuery.isError && <p>Could not load events.</p>}
@@ -71,6 +73,7 @@ export default function RunPage({
         </Card>
         <RunResults run={run} />
       </section>
+      <RunReplay run={run} />
     </main>
   )
 }

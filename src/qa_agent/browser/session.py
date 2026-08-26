@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from secrets import token_hex
 from types import TracebackType
-from typing import Literal
+from typing import Any, Literal, cast
 
 from playwright.async_api import (
     Browser,
@@ -15,6 +15,7 @@ from playwright.async_api import (
     Page,
     Playwright,
     Request,
+    ViewportSize,
     async_playwright,
 )
 
@@ -27,6 +28,7 @@ from qa_agent.browser.observation import (
     InteractiveElement,
     PageObservation,
 )
+from qa_agent.failures import FailureCategory
 
 MAX_RECORDED_ERRORS = 100
 
@@ -76,13 +78,26 @@ class ActionResult:
     element_id: int | None
     success: bool
     error: str | None = None
+    failure_category: FailureCategory | None = None
 
 
 class BrowserSession:
     """One isolated browser context, reusable for a complete QA task."""
 
-    def __init__(self, *, trace_path: Path) -> None:
+    def __init__(
+        self,
+        *,
+        trace_path: Path,
+        video_path: Path | None = None,
+        headers: dict[str, str] | None = None,
+        cookies: list[dict[str, Any]] | None = None,
+        viewport: dict[str, int] | None = None,
+    ) -> None:
         self.trace_path = trace_path
+        self.video_path = video_path
+        self.headers = headers or {}
+        self.cookies = cookies or []
+        self.viewport = viewport
         self.console_errors: list[str] = []
         self.failed_requests: list[str] = []
         self.dialog_messages: list[str] = []
@@ -95,7 +110,16 @@ class BrowserSession:
     async def __aenter__(self) -> BrowserSession:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch()
-        self._context = await self._browser.new_context()
+        self._context = await self._browser.new_context(
+            record_video_dir=self.video_path.parent if self.video_path else None,
+            record_video_size={"width": 800, "height": 450}
+            if self.video_path
+            else None,
+            extra_http_headers=self.headers or None,
+            viewport=cast(ViewportSize | None, self.viewport),
+        )
+        if self.cookies:
+            await self._context.add_cookies(cast(Any, self.cookies))
         await self._context.tracing.start(screenshots=True, snapshots=True)
         self.page = await self._context.new_page()
         self.page.on("console", self._record_console_error)
@@ -110,9 +134,13 @@ class BrowserSession:
         traceback: TracebackType | None,
     ) -> None:
         self._element_refs.clear()
+        video = self.page.video if self.page else None
         if self._context:
             await self._context.tracing.stop(path=self.trace_path)
             await self._context.close()
+        if video and self.video_path:
+            recorded_path = Path(await video.path())
+            recorded_path.replace(self.video_path)
         if self._browser:
             await self._browser.close()
         if self._playwright:
@@ -166,7 +194,11 @@ class BrowserSession:
                 return ActionResult("scroll", None, True)
             except Exception as exc:
                 return ActionResult(
-                    "scroll", None, False, f"{type(exc).__name__}: {exc}"
+                    "scroll",
+                    None,
+                    False,
+                    f"{type(exc).__name__}: {exc}",
+                    FailureCategory.BROWSER_ERROR,
                 )
             finally:
                 self._element_refs.clear()
@@ -178,6 +210,7 @@ class BrowserSession:
                 element_id=action.element_id,
                 success=False,
                 error="Unknown or stale element ID; observe the page again",
+                failure_category=FailureCategory.ACTION_FAILURE,
             )
 
         try:
@@ -187,6 +220,7 @@ class BrowserSession:
                     element_id=action.element_id,
                     success=False,
                     error="Element is disabled",
+                    failure_category=FailureCategory.ACTION_FAILURE,
                 )
             if isinstance(action, ClickAction):
                 await locator.click()
@@ -207,6 +241,7 @@ class BrowserSession:
                 element_id=action.element_id,
                 success=False,
                 error=f"{type(exc).__name__}: {exc}",
+                failure_category=FailureCategory.BROWSER_ERROR,
             )
         finally:
             self._element_refs.clear()

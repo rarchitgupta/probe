@@ -14,6 +14,8 @@ wheels/
 
 # Local QA run artifacts
 .runs/
+.eval-runs/
+.eval-reports/
 
 # Local task database
 .qa-agent/

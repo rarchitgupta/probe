@@ -1,0 +1,63 @@
+{
+  "name": "saucedemo-smoke",
+  "version": 1,
+  "cases": [
+    {
+      "id": "login-success",
+      "name": "Successful login",
+      "start_url": "https://www.saucedemo.com/",
+      "goal": "Log in with username standard_user and password secret_sauce, then verify that the inventory page loads.",
+      "tags": ["login", "forms", "navigation"],
+      "timeout_seconds": 60,
+      "checks": [
+        {
+          "assertion": "url_contains",
+          "expected": "/inventory.html"
+        },
+        {
+          "assertion": "text_visible",
+          "expected": "Sauce Labs Backpack",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "id": "add-item-to-cart",
+      "name": "Add item to cart",
+      "start_url": "https://www.saucedemo.com/",
+      "goal": "Log in with username standard_user and password secret_sauce. Add Sauce Labs Backpack to the cart, open the cart, and verify that Sauce Labs Backpack is visible there.",
+      "tags": ["login", "cart", "navigation"],
+      "timeout_seconds": 90,
+      "checks": [
+        {
+          "assertion": "url_contains",
+          "expected": "/cart.html"
+        },
+        {
+          "assertion": "text_visible",
+          "expected": "Sauce Labs Backpack",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "id": "complete-checkout",
+      "name": "Complete checkout",
+      "start_url": "https://www.saucedemo.com/",
+      "goal": "Log in with username standard_user and password secret_sauce. Add Sauce Labs Backpack to the cart and complete checkout using first name QA, last name Agent, and postal code 12345. Verify that Thank you for your order! is visible.",
+      "tags": ["login", "cart", "checkout", "forms", "navigation"],
+      "timeout_seconds": 150,
+      "checks": [
+        {
+          "assertion": "url_contains",
+          "expected": "/checkout-complete.html"
+        },
+        {
+          "assertion": "text_visible",
+          "expected": "Thank you for your order!",
+          "exact": true
+        }
+      ]
+    }
+  ]
+}

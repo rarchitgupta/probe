@@ -5,6 +5,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from qa_agent.database import Base
+from qa_agent.failures import FailureCategory
 
 
 def utc_now() -> datetime:
@@ -71,7 +73,25 @@ run_event_kind_type = Enum(
     values_callable=lambda kinds: [kind.value for kind in kinds],
     validate_strings=True,
 )
+failure_category_type = Enum(
+    FailureCategory,
+    name="failure_category",
+    native_enum=False,
+    values_callable=lambda categories: [category.value for category in categories],
+    validate_strings=True,
+)
 timestamp_type = UTCDateTime()
+
+
+class TestEnvironmentRecord(Base):
+    __tablename__ = "test_environments"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    definition: Mapped[dict[str, object]] = mapped_column(JSON)
+    viewport_width: Mapped[int]
+    viewport_height: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)
 
 
 class TaskRunRecord(Base):
@@ -90,6 +110,9 @@ class TaskRunRecord(Base):
     title: Mapped[str | None] = mapped_column(String(60))
     start_url: Mapped[str] = mapped_column(Text)
     goal: Mapped[str] = mapped_column(Text)
+    environment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("test_environments.id", ondelete="SET NULL")
+    )
     status: Mapped[RunStatus] = mapped_column(run_status_type)
     created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(timestamp_type)
@@ -99,13 +122,18 @@ class TaskRunRecord(Base):
     http_status: Mapped[int | None]
     summary: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    failure_category: Mapped[FailureCategory | None] = mapped_column(
+        failure_category_type
+    )
     artifact_directory: Mapped[str | None] = mapped_column(Text)
+    model_name: Mapped[str | None] = mapped_column(String(100))
+    prompt_version: Mapped[str | None] = mapped_column(String(32))
+    model_config_version: Mapped[str | None] = mapped_column(String(32))
 
     input_tokens: Mapped[int | None]
     output_tokens: Mapped[int | None]
     cache_read_tokens: Mapped[int | None]
     request_count: Mapped[int | None]
-    tool_call_count: Mapped[int | None]
     cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
 
 
@@ -134,3 +162,16 @@ class RunEventRecord(Base):
     element: Mapped[str | None] = mapped_column(Text)
     success: Mapped[bool | None] = mapped_column(Boolean)
     message: Mapped[str | None] = mapped_column(Text)
+
+
+class RunArtifactRecord(Base):
+    __tablename__ = "run_artifacts"
+    __table_args__ = (Index("ix_run_artifacts_run_id", "run_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(32))
+    path: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(String(100))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)

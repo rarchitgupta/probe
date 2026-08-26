@@ -1,15 +1,20 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowLeftIcon, CopyIcon } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ArrowLeftIcon, CopyIcon, RotateCcwIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
-import type { Run } from "@/lib/runs"
+import { runTitle, type Run, useCancelRun, useRerun } from "@/lib/runs"
 
 export function RunHeader({ run }: { run: Run }) {
+  const router = useRouter()
+  const cancelRun = useCancelRun()
+  const rerun = useRerun()
   const hostname = new URL(run.start_url).hostname
+  const active = run.status === "queued" || run.status === "running"
 
   async function copyRunId() {
     try {
@@ -18,6 +23,25 @@ export function RunHeader({ run }: { run: Run }) {
     } catch {
       toast.error("Could not copy run ID")
     }
+  }
+
+  function cancel() {
+    cancelRun.mutate(run.id, {
+      onSuccess: () => toast.success("Run cancelled"),
+      onError: (error) =>
+        toast.error("Could not cancel run", { description: error.message }),
+    })
+  }
+
+  function runAgain() {
+    rerun.mutate(run.id, {
+      onSuccess: (nextRun) => {
+        toast.success("Rerun queued")
+        router.push(`/runs/${nextRun.id}`)
+      },
+      onError: (error) =>
+        toast.error("Could not rerun task", { description: error.message }),
+    })
   }
 
   return (
@@ -33,7 +57,7 @@ export function RunHeader({ run }: { run: Run }) {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div className="min-w-0 space-y-1">
           <h1 className="truncate text-2xl font-semibold tracking-tight">
-            {run.title ?? "Preparing run…"}
+            {runTitle(run)}
           </h1>
           <p className="text-sm text-muted-foreground">{hostname}</p>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -50,7 +74,32 @@ export function RunHeader({ run }: { run: Run }) {
             </Button>
           </div>
         </div>
-        <StatusBadge status={run.status} />
+        <div className="flex items-center gap-2">
+          {active ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={cancel}
+              disabled={cancelRun.isPending}
+            >
+              <XIcon data-icon="inline-start" />
+              {cancelRun.isPending ? "Cancelling…" : "Cancel"}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={runAgain}
+              disabled={rerun.isPending}
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              {rerun.isPending ? "Queuing…" : "Rerun"}
+            </Button>
+          )}
+          <StatusBadge status={run.status} />
+        </div>
       </div>
     </header>
   )

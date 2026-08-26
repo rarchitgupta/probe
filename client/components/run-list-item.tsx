@@ -8,7 +8,7 @@ import {
 
 import { StatusBadge } from "@/components/status-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { RunListItem as RunListItemType } from "@/lib/runs"
+import { runTitle, type RunListItem as RunListItemType } from "@/lib/runs"
 
 function duration(run: RunListItemType) {
   if (!run.started_at || !run.finished_at) return null
@@ -31,7 +31,7 @@ export function RunListItem({ run }: { run: RunListItemType }) {
         <CardHeader className="grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0 space-y-1">
             <CardTitle className="truncate text-base">
-              {run.title ?? "Preparing run…"}
+              {runTitle(run)}
             </CardTitle>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <LinkIcon className="size-3.5 shrink-0" />

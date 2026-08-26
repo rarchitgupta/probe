@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import io
 from contextlib import redirect_stdout
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from qa_agent.cli import main
+from qa_agent.evaluation import BenchmarkMetrics, BenchmarkResult
 from qa_agent.runner import AgentTaskResult
 
 
@@ -22,7 +24,7 @@ class TestCli:
             summary="Checkout works",
             evidence=("text_visible: Order confirmed",),
             diagnostics=(),
-            usage={"requests": 4, "tool_calls": 5, "cost": "0.00026"},
+            usage={"requests": 4, "cost": "0.00026"},
             error=None,
             artifact_directory=".runs/task-1",
         )
@@ -52,7 +54,7 @@ class TestCli:
         assert execute.call_args.kwargs["artifact_root"] == Path("artifacts")
         assert exit_code.value.code == 0
         assert "PASSED  task-1" in output.getvalue()
-        assert "4 requests · 5 tools · $0.000260" in output.getvalue()
+        assert "4 requests · $0.000260" in output.getvalue()
 
     def test_runs_agent_through_queue(self) -> None:
         result = AgentTaskResult(
@@ -90,3 +92,58 @@ class TestCli:
 
         assert execute.call_args.args[1:] == (Path("artifacts"),)
         assert exit_code.value.code == 0
+
+    def test_runs_evaluation_suite_and_writes_report(self) -> None:
+        suite = object()
+        metrics = BenchmarkMetrics(
+            total_trials=1,
+            verdict_counts={"true_pass": 1},
+            success_rate=1,
+            false_pass_rate=0,
+            median_duration_ms=100,
+            p95_duration_ms=100,
+            average_requests=3,
+            average_input_tokens=100,
+            average_output_tokens=20,
+            average_cache_read_tokens=0,
+            total_cost=Decimal("0.001"),
+            average_cost=Decimal("0.001"),
+        )
+        result = BenchmarkResult(
+            suite_name="smoke",
+            suite_version=1,
+            trials_per_case=1,
+            trials=(),
+            metrics=metrics,
+        )
+
+        with (
+            patch("qa_agent.cli.load_evaluation_suite", return_value=suite),
+            patch(
+                "qa_agent.cli.run_suite", new=AsyncMock(return_value=result)
+            ) as execute,
+            patch("qa_agent.cli.write_report") as write,
+            redirect_stdout(io.StringIO()) as output,
+            pytest.raises(SystemExit) as exit_code,
+        ):
+            main(
+                [
+                    "eval",
+                    "suite.json",
+                    "--trials",
+                    "2",
+                    "--output",
+                    "report.json",
+                    "--artifacts",
+                    "artifacts",
+                ]
+            )
+
+        assert execute.call_args.kwargs == {
+            "trials_per_case": 2,
+            "artifact_root": Path("artifacts"),
+        }
+        assert write.call_args.args == (result, suite, Path("report.json"))
+        assert exit_code.value.code == 0
+        assert "Success: 100.0%" in output.getvalue()
+        assert "Report: report.json" in output.getvalue()

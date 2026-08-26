@@ -1,50 +1,54 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
+
+ExpectedText = Annotated[str, Field(min_length=1)]
+ASSERTION_CONFIG = ConfigDict(extra="forbid")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class UrlContainsAssertion:
     assertion: Literal["url_contains"]
-    expected: str
+    expected: ExpectedText
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class TitleEqualsAssertion:
     assertion: Literal["title_equals"]
-    expected: str
+    expected: ExpectedText
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class TextVisibleAssertion:
     assertion: Literal["text_visible"]
-    expected: str
+    expected: ExpectedText
     exact: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class CheckedAssertion:
     assertion: Literal["checked"]
     element_id: int
     expected: bool
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class SelectedOptionAssertion:
     assertion: Literal["selected_option"]
     element_id: int
-    expected: str
+    expected: ExpectedText
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class DialogMessageAssertion:
     assertion: Literal["dialog_message"]
-    expected: str
+    expected: ExpectedText
 
 
 PageAssertion = UrlContainsAssertion | TitleEqualsAssertion | TextVisibleAssertion

@@ -14,6 +14,8 @@ from pydantic_ai import ModelAPIError, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from qa_agent.agent import AgentTask
+from qa_agent.evaluation import EvaluationCase, run_trial
+from qa_agent.failures import FailureCategory
 from qa_agent.runner import execute_agent_task
 
 pytestmark = pytest.mark.browser
@@ -105,6 +107,10 @@ class TestAgentRunner:
             thread.join()
 
         assert result.error == "Model request timed out after 60 seconds"
+        assert result.failure_category == FailureCategory.MODEL_TIMEOUT
+        assert result.configuration is not None
+        assert result.configuration.prompt_version == "1"
+        assert result.configuration.model_config_version == "1"
         assert len(result.diagnostics) == 1
         assert result.diagnostics[0].action == "fill"
 
@@ -180,34 +186,51 @@ class TestAgentRunner:
         try:
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                task = AgentTask(
-                    task_id="agent-run",
-                    goal="Fill the name and verify the form",
-                    start_url=f"http://127.0.0.1:{server.server_port}",
+                case = EvaluationCase.model_validate(
+                    {
+                        "id": "fill-example-form",
+                        "name": "Fill example form",
+                        "start_url": f"http://127.0.0.1:{server.server_port}",
+                        "goal": "Fill the name and verify the form",
+                        "checks": [
+                            {
+                                "assertion": "text_visible",
+                                "expected": "This outcome is intentionally absent",
+                            }
+                        ],
+                    }
                 )
                 with patch.dict("os.environ", {"PROBE_DIAGNOSTICS": "false"}):
-                    result = await execute_agent_task(
-                        task,
+                    trial = await run_trial(
+                        case,
                         model=FunctionModel(respond),
                         artifact_root=root,
+                        grader_timeout_ms=50,
                     )
-                saved = json.loads((root / task.task_id / "result.json").read_text())
+                run_directory = Path(trial.artifact_directory)
+                saved = json.loads((run_directory / "result.json").read_text())
 
-                assert result.error is None
-                assert (root / task.task_id / "screenshot.png").exists()
-                assert (root / task.task_id / "trace.zip").exists()
+                assert trial.error is None
+                assert (run_directory / "screenshot.png").exists()
+                assert (run_directory / "trace.zip").exists()
+                assert (run_directory / "replay.webm").stat().st_size > 0
         finally:
             server.shutdown()
             server.server_close()
             thread.join()
 
-        assert result.status == "passed"
-        assert result.summary == "Completed all 2 test steps"
-        assert result.title == "Fill Example Form"
-        assert result.usage["requests"] == 3
-        assert result.diagnostics == ()
+        assert trial.agent_status == "passed"
+        assert trial.oracle_passed is False
+        assert trial.verdict == "false_pass"
+        assert trial.failure_category is None
+        assert trial.configuration is not None
+        assert trial.duration_ms is not None
+        assert trial.duration_ms > 0
+        assert saved["summary"] == "Completed all 2 test steps"
+        assert saved["title"] == "Fill Example Form"
+        assert trial.usage["requests"] == 3
         assert saved["diagnostics"] == []
         assert "Ada" not in json.dumps(saved)
         assert "London" not in json.dumps(saved)
         assert saved["evidence"] == ["title_equals: expected='Form', actual='Form'"]
-        assert task.goal not in json.dumps(saved)
+        assert case.goal not in json.dumps(saved)

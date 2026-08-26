@@ -6,13 +6,14 @@ import os
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Literal
 
-from dotenv import load_dotenv
 from langfuse import propagate_attributes
 from openai import APITimeoutError
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Page
 from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
 from pydantic_ai.models import Model
 
@@ -29,14 +30,18 @@ from qa_agent.agent import (
     step_agent,
 )
 from qa_agent.artifacts import ArtifactPaths
-from qa_agent.browser import BrowserSession, InteractiveElement
+from qa_agent.browser import BrowserSession
+from qa_agent.configuration import AgentConfiguration
+from qa_agent.environments import EnvironmentProfile, resolve_environment
+from qa_agent.failures import FailureCategory
 from qa_agent.llm import (
+    DEEPSEEK_MODEL_NAME,
     DEEPSEEK_SETTINGS,
     MODEL_REQUEST_TIMEOUT_SECONDS,
     deepseek_model,
 )
 from qa_agent.observability import configure_observability
-from qa_agent.policy import ExecutionGuard, ExecutionPolicy
+from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation
 
 logger = logging.getLogger(__name__)
 
@@ -48,29 +53,7 @@ AGENT_USAGE_LIMITS = UsageLimits(
 AGENT_EXECUTION_POLICY = ExecutionPolicy(timeout_seconds=150)
 MAX_STEP_ROUNDS = 6
 ProgressHandler = Callable[[ProgressEntry], Awaitable[None]]
-
-
-@dataclass(frozen=True)
-class InspectionTask:
-    task_id: str
-    url: str
-
-
-@dataclass(frozen=True)
-class InspectionResult:
-    task_id: str
-    status: Literal["completed", "error"]
-    started_at: str
-    finished_at: str
-    requested_url: str
-    final_url: str | None
-    title: str | None
-    http_status: int | None
-    elements: tuple[InteractiveElement, ...]
-    console_errors: tuple[str, ...]
-    failed_requests: tuple[str, ...]
-    error: str | None
-    artifact_directory: str
+FinalPageHandler = Callable[[Page], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -87,53 +70,9 @@ class AgentTaskResult:
     error: str | None
     artifact_directory: str
     title: str | None = None
-
-
-async def execute_inspection(
-    task: InspectionTask,
-    *,
-    artifact_root: Path = Path(".runs"),
-) -> InspectionResult:
-    started_at = datetime.now(UTC).isoformat()
-    artifacts = ArtifactPaths.create(artifact_root, task.task_id)
-    final_url: str | None = None
-    title: str | None = None
-    http_status: int | None = None
-    elements: tuple[InteractiveElement, ...] = ()
-    error: str | None = None
-
-    async with BrowserSession(trace_path=artifacts.trace) as browser:
-        try:
-            http_status = await browser.navigate(task.url)
-            observation = await browser.observe()
-            final_url = observation.url
-            title = observation.title
-            elements = observation.elements
-        except Exception as exc:
-            final_url = browser.page.url if browser.page else None
-            error = f"{type(exc).__name__}: {exc}"
-        try:
-            await browser.screenshot(artifacts.screenshot)
-        except Exception:
-            pass
-
-    result = InspectionResult(
-        task_id=task.task_id,
-        status="error" if error else "completed",
-        started_at=started_at,
-        finished_at=datetime.now(UTC).isoformat(),
-        requested_url=task.url,
-        final_url=final_url,
-        title=title,
-        http_status=http_status,
-        elements=elements,
-        console_errors=tuple(browser.console_errors),
-        failed_requests=tuple(browser.failed_requests),
-        error=error,
-        artifact_directory=str(artifacts.run),
-    )
-    artifacts.write_result(asdict(result))
-    return result
+    duration_ms: int | None = None
+    failure_category: FailureCategory | None = None
+    configuration: AgentConfiguration | None = None
 
 
 async def execute_agent_task(
@@ -144,8 +83,9 @@ async def execute_agent_task(
     usage_limits: UsageLimits = AGENT_USAGE_LIMITS,
     artifact_root: Path = Path(".runs"),
     event_handler: ProgressHandler | None = None,
+    final_page_handler: FinalPageHandler | None = None,
+    environment: EnvironmentProfile | None = None,
 ) -> AgentTaskResult:
-    load_dotenv()
     keep_diagnostics = os.getenv("PROBE_DIAGNOSTICS", "").lower() in {
         "1",
         "true",
@@ -163,12 +103,28 @@ async def execute_agent_task(
     diagnostics: tuple[ActionDiagnostic, ...] = ()
     usage: dict[str, object] = {}
     error: str | None = None
+    failure_category: FailureCategory | None = None
     deps: AgentDeps | None = None
     run_usage = RunUsage()
-
+    duration_ms: int | None = None
+    configuration = AgentConfiguration(
+        model=(
+            str(getattr(model, "model_name", type(model).__name__))
+            if model
+            else DEEPSEEK_MODEL_NAME
+        )
+    )
     try:
+        resolved_environment = resolve_environment(environment, str(task.start_url))
         async with asyncio.timeout(guard.remaining_seconds):
-            async with BrowserSession(trace_path=artifacts.trace) as browser:
+            async with BrowserSession(
+                trace_path=artifacts.trace,
+                video_path=artifacts.video,
+                headers=resolved_environment.headers,
+                cookies=resolved_environment.cookies,
+                viewport=resolved_environment.viewport,
+            ) as browser:
+                execution_started = perf_counter()
                 try:
                     start_url = str(task.start_url)
                     guard.check_url(start_url)
@@ -180,6 +136,7 @@ async def execute_agent_task(
                     deps = AgentDeps(
                         browser,
                         guard,
+                        secrets=resolved_environment.secrets,
                         elements={
                             element.id: element for element in initial_state.elements
                         },
@@ -191,6 +148,9 @@ async def execute_agent_task(
                             metadata={
                                 "task_id": task.task_id,
                                 "target_host": task.start_url.host,
+                                "model": configuration.model,
+                                "prompt_version": configuration.prompt_version,
+                                "model_config_version": configuration.model_config_version,
                             },
                             tags=["browser-qa"],
                             trace_name="browser-qa-task",
@@ -199,8 +159,18 @@ async def execute_agent_task(
                         else nullcontext()
                     )
                     with trace_context:
+                        spec_goal = task.goal
+                        if resolved_environment.secrets:
+                            aliases = ", ".join(
+                                f"{{{{secret:{name}}}}}"
+                                for name in resolved_environment.secrets
+                            )
+                            spec_goal += (
+                                "\nAvailable secret placeholders (copy literally when "
+                                f"needed): {aliases}"
+                            )
                         spec_run = await spec_agent.run(
-                            task.goal,
+                            spec_goal,
                             model=selected_model,
                             model_settings=None if model else DEEPSEEK_SETTINGS,
                             usage_limits=usage_limits,
@@ -210,6 +180,7 @@ async def execute_agent_task(
                         completed_steps = []
                         for step in spec_run.output.steps:
                             deps.successful_actions.clear()
+                            deps.failure_category = None
                             progress: list[ProgressEntry] = []
                             evidence_before = len(deps.evidence)
                             for _ in range(MAX_STEP_ROUNDS):
@@ -233,6 +204,11 @@ async def execute_agent_task(
                                 decision = decision_run.output
                                 if decision.failure:
                                     status = "blocked" if decision.blocked else "failed"
+                                    failure_category = deps.failure_category or (
+                                        FailureCategory.ASSERTION_FAILURE
+                                        if step.kind == "assertion"
+                                        else FailureCategory.ACTION_FAILURE
+                                    )
                                     summary = sanitize_summary(
                                         decision.failure, deps.sensitive_values
                                     )
@@ -288,6 +264,11 @@ async def execute_agent_task(
                                     )
                             else:
                                 status = "failed"
+                                failure_category = deps.failure_category or (
+                                    FailureCategory.ASSERTION_FAILURE
+                                    if step.kind == "assertion"
+                                    else FailureCategory.ACTION_FAILURE
+                                )
                                 summary = f"Step {step.id} exceeded its execution limit"
 
                             if status in {"failed", "blocked"}:
@@ -299,24 +280,37 @@ async def execute_agent_task(
                         evidence = tuple(deps.evidence)
                     diagnostics = tuple(deps.diagnostics)
                 finally:
+                    duration_ms = round((perf_counter() - execution_started) * 1000)
                     final_url = browser.page.url if browser.page else final_url
+                    if final_page_handler and browser.page:
+                        await final_page_handler(browser.page)
                     try:
                         await browser.screenshot(artifacts.screenshot)
                     except Exception:
                         pass
     except APITimeoutError:
+        failure_category = FailureCategory.MODEL_TIMEOUT
         error = (
             f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
         )
     except ModelAPIError as exc:
-        error = (
-            f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
-            if isinstance(exc.__cause__, APITimeoutError)
-            else f"{type(exc).__name__}: {exc}"
-        )
+        if isinstance(exc.__cause__, APITimeoutError):
+            failure_category = FailureCategory.MODEL_TIMEOUT
+            error = f"Model request timed out after {MODEL_REQUEST_TIMEOUT_SECONDS:g} seconds"
+        else:
+            failure_category = FailureCategory.MODEL_ERROR
+            error = f"{type(exc).__name__}: {exc}"
     except TimeoutError:
+        failure_category = FailureCategory.EXECUTION_TIMEOUT
         error = f"Execution timed out after {policy.timeout_seconds:g} seconds"
+    except PolicyViolation as exc:
+        failure_category = FailureCategory.POLICY_VIOLATION
+        error = str(exc)
+    except PlaywrightError as exc:
+        failure_category = FailureCategory.BROWSER_ERROR
+        error = f"{type(exc).__name__}: {exc}"
     except Exception as exc:
+        failure_category = FailureCategory.INFRASTRUCTURE_ERROR
         error = f"{type(exc).__name__}: {exc}"
 
     if deps:
@@ -342,6 +336,9 @@ async def execute_agent_task(
         error=error,
         artifact_directory=str(artifacts.run),
         title=title,
+        duration_ms=duration_ms,
+        failure_category=failure_category,
+        configuration=configuration,
     )
     artifacts.write_result(asdict(result))
     if langfuse:
