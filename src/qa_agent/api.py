@@ -10,8 +10,10 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from sqlalchemy.exc import IntegrityError
 
 from qa_agent.agent import AgentTask
+from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.failures import FailureCategory
 from qa_agent.runs import (
     InvalidRunTransitionError,
@@ -26,6 +28,23 @@ from qa_agent.runs import (
 class CreateRunRequest(BaseModel):
     start_url: HttpUrl
     goal: str = Field(min_length=1)
+    environment_id: str | None = None
+
+
+class CreateEnvironmentRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    definition: EnvironmentDefinition = Field(default_factory=EnvironmentDefinition)
+    viewport_width: int = Field(default=1280, ge=320, le=3840)
+    viewport_height: int = Field(default=720, ge=240, le=2160)
+
+
+class EnvironmentResponse(BaseModel):
+    id: str
+    name: str
+    definition: EnvironmentDefinition
+    viewport_width: int
+    viewport_height: int
+    created_at: datetime
 
 
 class UpdateRunRequest(BaseModel):
@@ -100,6 +119,7 @@ class RunResponse(BaseModel):
     result: RunResultResponse | None
     error: str | None
     failure_category: FailureCategory | None
+    environment_id: str | None
 
 
 class RunEventResponse(BaseModel):
@@ -144,12 +164,49 @@ STREAM_TERMINAL_STATUSES = {
 }
 
 
+@app.post(
+    "/environments",
+    response_model=EnvironmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_environment(
+    payload: CreateEnvironmentRequest, request: Request
+) -> EnvironmentResponse:
+    queue: RunQueueService = request.app.state.run_queue
+    try:
+        environment = await queue.create_environment(**payload.model_dump())
+    except IntegrityError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Environment name already exists"
+        ) from None
+    return _environment_response(environment)
+
+
+@app.get("/environments", response_model=list[EnvironmentResponse])
+async def list_environments(request: Request) -> list[EnvironmentResponse]:
+    queue: RunQueueService = request.app.state.run_queue
+    return [
+        _environment_response(environment)
+        for environment in await queue.list_environments()
+    ]
+
+
 @app.post("/runs", response_model=RunResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_run(
     payload: CreateRunRequest, request: Request, response: Response
 ) -> RunResponse:
     queue: RunQueueService = request.app.state.run_queue
-    run = await queue.submit(AgentTask(start_url=payload.start_url, goal=payload.goal))
+    if payload.environment_id and not await queue.get_environment(
+        payload.environment_id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Environment not found")
+    run = await queue.submit(
+        AgentTask(
+            start_url=payload.start_url,
+            goal=payload.goal,
+            environment_id=payload.environment_id,
+        )
+    )
     response.headers["Location"] = f"/runs/{run.id}"
     return _run_response(run)
 
@@ -279,7 +336,13 @@ async def rerun(run_id: str, request: Request, response: Response) -> RunRespons
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found")
     if source.status in {RunStatus.QUEUED, RunStatus.RUNNING}:
         raise HTTPException(status.HTTP_409_CONFLICT, "Run has not finished")
-    run = await queue.submit(AgentTask(start_url=source.start_url, goal=source.goal))
+    run = await queue.submit(
+        AgentTask(
+            start_url=source.start_url,
+            goal=source.goal,
+            environment_id=source.environment_id,
+        )
+    )
     response.headers["Location"] = f"/runs/{run.id}"
     return _run_response(run)
 
@@ -356,6 +419,18 @@ def _run_response(run: TaskRun) -> RunResponse:
         ),
         error=run.error,
         failure_category=run.failure_category,
+        environment_id=run.environment_id,
+    )
+
+
+def _environment_response(environment: EnvironmentProfile) -> EnvironmentResponse:
+    return EnvironmentResponse(
+        id=environment.id,
+        name=environment.name,
+        definition=environment.definition,
+        viewport_width=environment.viewport_width,
+        viewport_height=environment.viewport_height,
+        created_at=environment.created_at,
     )
 
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from secrets import token_hex
 from types import TracebackType
-from typing import Literal
+from typing import Any, Literal, cast
 
 from playwright.async_api import (
     Browser,
@@ -15,6 +15,7 @@ from playwright.async_api import (
     Page,
     Playwright,
     Request,
+    ViewportSize,
     async_playwright,
 )
 
@@ -83,9 +84,20 @@ class ActionResult:
 class BrowserSession:
     """One isolated browser context, reusable for a complete QA task."""
 
-    def __init__(self, *, trace_path: Path, video_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        trace_path: Path,
+        video_path: Path | None = None,
+        headers: dict[str, str] | None = None,
+        cookies: list[dict[str, Any]] | None = None,
+        viewport: dict[str, int] | None = None,
+    ) -> None:
         self.trace_path = trace_path
         self.video_path = video_path
+        self.headers = headers or {}
+        self.cookies = cookies or []
+        self.viewport = viewport
         self.console_errors: list[str] = []
         self.failed_requests: list[str] = []
         self.dialog_messages: list[str] = []
@@ -103,7 +115,11 @@ class BrowserSession:
             record_video_size={"width": 800, "height": 450}
             if self.video_path
             else None,
+            extra_http_headers=self.headers or None,
+            viewport=cast(ViewportSize | None, self.viewport),
         )
+        if self.cookies:
+            await self._context.add_cookies(cast(Any, self.cookies))
         await self._context.tracing.start(screenshots=True, snapshots=True)
         self.page = await self._context.new_page()
         self.page.on("console", self._record_console_error)

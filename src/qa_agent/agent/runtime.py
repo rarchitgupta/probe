@@ -34,6 +34,7 @@ from qa_agent.browser import (
     SelectOptionAction,
     SetCheckedAction,
 )
+from qa_agent.environments import resolve_secret
 from qa_agent.execution import execute_guarded_action
 from qa_agent.failures import FailureCategory
 from qa_agent.policy import ExecutionGuard, PolicyViolation
@@ -64,6 +65,7 @@ class AgentDeps:
     sensitive_values: set[str] = field(default_factory=set)
     successful_actions: set[tuple[object, ...]] = field(default_factory=set)
     failure_category: FailureCategory | None = None
+    secrets: dict[str, str] = field(default_factory=dict)
 
 
 async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolResult:
@@ -99,6 +101,10 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
     result = ToolResult(success=True)
     executed = False
     for target, value in targets:
+        if isinstance(value, str):
+            value = resolve_secret(value, deps.secrets)
+            if value in deps.secrets.values():
+                deps.sensitive_values.add(value)
         matches = [
             element
             for element in deps.elements.values()

@@ -3,7 +3,12 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { HomeIcon, ListChecksIcon, GlobeCheckIcon } from "lucide-react"
+import {
+  FlaskConicalIcon,
+  GlobeCheckIcon,
+  HomeIcon,
+  ListChecksIcon,
+} from "lucide-react"
 
 import {
   Sidebar,
@@ -19,6 +24,7 @@ import {
 const navigation = [
   { title: "Home", url: "/", icon: HomeIcon },
   { title: "Runs", url: "/runs", icon: ListChecksIcon },
+  { title: "Environments", url: "/environments", icon: FlaskConicalIcon },
 ]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {

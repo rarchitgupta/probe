@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from qa_agent.agent import AgentTask
 from qa_agent.api import app, lifespan
 from qa_agent.configuration import AgentConfiguration
+from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import (
     RunArtifact,
@@ -37,6 +38,42 @@ class TestApiLifespan:
 
 
 class TestCreateRun:
+    def test_creates_and_lists_environments(self) -> None:
+        created_at = datetime.now(UTC)
+        environment = EnvironmentProfile(
+            id="environment-1",
+            name="Staging",
+            definition=EnvironmentDefinition(secrets={"password": "TEST_PASSWORD"}),
+            viewport_width=1024,
+            viewport_height=768,
+            created_at=created_at,
+        )
+        queue = Mock(spec=RunQueueService)
+        queue.start = AsyncMock()
+        queue.close = AsyncMock()
+        queue.create_environment = AsyncMock(return_value=environment)
+        queue.list_environments = AsyncMock(return_value=[environment])
+
+        with (
+            patch("qa_agent.api.RunQueueService", return_value=queue),
+            TestClient(app) as client,
+        ):
+            created = client.post(
+                "/environments",
+                json={
+                    "name": "Staging",
+                    "definition": {"secrets": {"password": "TEST_PASSWORD"}},
+                    "viewport_width": 1024,
+                    "viewport_height": 768,
+                },
+            )
+            listed = client.get("/environments")
+
+        assert created.status_code == 201
+        assert created.json()["id"] == "environment-1"
+        assert created.json()["definition"]["secrets"] == {"password": "TEST_PASSWORD"}
+        assert listed.json() == [created.json()]
+
     def test_allows_cors_from_local_frontend(self) -> None:
         queue = Mock(spec=RunQueueService)
         queue.start = AsyncMock()

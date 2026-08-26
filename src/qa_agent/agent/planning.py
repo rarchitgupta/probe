@@ -25,6 +25,7 @@ class AgentTask(BaseModel):
     )
     goal: str = Field(min_length=1)
     start_url: HttpUrl
+    environment_id: str | None = None
 
 
 class ElementState(BaseModel):

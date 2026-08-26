@@ -6,11 +6,37 @@ import pytest
 
 from qa_agent.agent import AgentTask, ProgressEntry
 from qa_agent.configuration import AgentConfiguration
+from qa_agent.environments import EnvironmentDefinition
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
 
 
 class TestRunStore:
+    async def test_persists_reusable_environment(self, run_store: RunStore) -> None:
+        environment = await run_store.create_environment(
+            name="Staging",
+            definition=EnvironmentDefinition(secrets={"password": "TEST_PASSWORD"}),
+            viewport_width=1024,
+            viewport_height=768,
+        )
+        await run_store.create(
+            AgentTask(
+                task_id="environment-run",
+                start_url="https://example.com",
+                goal="Verify the page",
+                environment_id=environment.id,
+            )
+        )
+
+        loaded = await run_store.get_environment(environment.id)
+        runs = await run_store.list_runs()
+
+        assert loaded == environment
+        assert [item.name for item in await run_store.list_environments()] == [
+            "Staging"
+        ]
+        assert runs[0].environment_id == environment.id
+
     async def test_persists_and_transitions_a_run(
         self, run_store: RunStore, tmp_path: Path
     ) -> None:

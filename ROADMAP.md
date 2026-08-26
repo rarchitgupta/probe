@@ -30,8 +30,8 @@ Build a repository-native evaluation system before adding more agent behavior.
   independently of the agent's own `passed` claim.
 - [x] Repeat trials to measure nondeterminism and classify false passes, false
   failures, timeouts, blocked tasks, and infrastructure errors.
-- [ ] Report success rate, model requests, tokens, cache usage, cost, browser actions,
-  retries, and agent latency.
+- [x] Report success and false-pass rates, model requests, tokens, cache usage,
+  cost, and median/p95 agent latency.
 - [x] Generate portable, versioned JSON reports containing the suite, trials,
   aggregate metrics, model/runtime metadata, commit, and artifact paths.
 - [x] Compare compatible JSON reports against a baseline and flag quality
@@ -58,15 +58,16 @@ Use benchmark failures—not speculation—to choose the next browser capabiliti
 - [x] Add stable failure categories and prompt/model configuration versioning.
 - [x] Add cancellation and reruns for queued, running, and completed tasks.
 - [x] Replace frontend polling with Server-Sent Events for one-way live progress.
-- [ ] Add optional video replay and preserve screenshots/Playwright traces as
-  evidence.
-- [ ] Add reusable environment inputs for headers, cookies, viewport, and secret
-  references.
-- [ ] Add prompt-injection cases, strict origin/permission policies, SSRF protection,
-  and sensitive-data redaction.
-- [ ] Add vision only as a measured fallback for pages the semantic DOM cannot
-  represent.
-- [ ] Generate frontend types from FastAPI's OpenAPI schema to prevent API drift.
+- [x] Record local WebM replays, persist artifact metadata, and serve range-enabled
+  playback while preserving screenshots and Playwright traces.
+- [x] Enforce same-origin navigation, action/time bounds, and redact values entered
+  during runs from summaries and diagnostics.
+- [x] Add reusable test-environment inputs for headers, cookies, viewport, and named
+  environment-variable secret references.
+- [ ] Later, generate frontend types from FastAPI's OpenAPI schema to prevent API
+  drift.
+- [ ] Before exposing Probe beyond localhost, block private-network SSRF targets and
+  add a small prompt-injection evaluation case.
 
 ## 3. Durable queue and production data
 
@@ -117,6 +118,7 @@ execution system is enough.
 
 - Multi-agent planner/executor/verifier systems
 - Screenshot-first prompting or vision on every step
+- Vision fallback until evaluations demonstrate a semantic-DOM failure it solves
 - LLM judges for outcomes that deterministic browser checks can verify
 - RAG, embeddings, or `pgvector` without a real retrieval feature
 - Multi-tenancy, billing, and enterprise RBAC

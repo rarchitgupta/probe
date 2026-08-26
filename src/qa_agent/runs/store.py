@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from qa_agent.agent import AgentTask, ProgressEntry
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.database import async_session_factory
+from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.failures import FailureCategory
 from qa_agent.runner import AgentTaskResult
 from qa_agent.runs.models import (
@@ -21,6 +22,7 @@ from qa_agent.runs.models import (
     RunEventRecord,
     RunStatus,
     TaskRunRecord,
+    TestEnvironmentRecord,
 )
 
 TERMINAL_STATUSES = {
@@ -50,6 +52,7 @@ class TaskRun:
     failure_category: FailureCategory | None = None
     events: tuple[RunEvent, ...] = ()
     artifacts: tuple[RunArtifact, ...] = ()
+    environment_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class RunStore:
             id=task.task_id,
             start_url=str(task.start_url),
             goal=task.goal,
+            environment_id=task.environment_id,
             status=RunStatus.QUEUED,
         )
         async with self.sessions.begin() as session:
@@ -117,6 +121,39 @@ class RunStore:
         async with self.sessions() as session:
             records = (await session.scalars(query)).all()
         return [_task_run(record) for record in records]
+
+    async def create_environment(
+        self,
+        *,
+        name: str,
+        definition: EnvironmentDefinition,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> EnvironmentProfile:
+        record = TestEnvironmentRecord(
+            id=uuid4().hex,
+            name=name,
+            definition=definition.model_dump(mode="json"),
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+        )
+        async with self.sessions.begin() as session:
+            session.add(record)
+        return _test_environment(record)
+
+    async def get_environment(self, environment_id: str) -> EnvironmentProfile | None:
+        async with self.sessions() as session:
+            record = await session.get(TestEnvironmentRecord, environment_id)
+            return _test_environment(record) if record else None
+
+    async def list_environments(self) -> list[EnvironmentProfile]:
+        async with self.sessions() as session:
+            records = (
+                await session.scalars(
+                    select(TestEnvironmentRecord).order_by(TestEnvironmentRecord.name)
+                )
+            ).all()
+        return [_test_environment(record) for record in records]
 
     async def get_details(self, run_id: str) -> TaskRun | None:
         async with self.sessions() as session:
@@ -404,6 +441,7 @@ def _task_run(
         failure_category=record.failure_category,
         events=run_events,
         artifacts=tuple(_run_artifact(artifact) for artifact in artifacts or ()),
+        environment_id=record.environment_id,
     )
 
 
@@ -433,5 +471,16 @@ def _run_artifact(record: RunArtifactRecord) -> RunArtifact:
         path=record.path,
         content_type=record.content_type,
         size_bytes=record.size_bytes,
+        created_at=record.created_at,
+    )
+
+
+def _test_environment(record: TestEnvironmentRecord) -> EnvironmentProfile:
+    return EnvironmentProfile(
+        id=record.id,
+        name=record.name,
+        definition=EnvironmentDefinition.model_validate(record.definition),
+        viewport_width=record.viewport_width,
+        viewport_height=record.viewport_height,
         created_at=record.created_at,
     )

@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.runner import AgentTaskResult, execute_agent_task
 from qa_agent.runs.store import RunArtifact, RunEvent, RunStatus, RunStore, TaskRun
 
@@ -74,6 +75,27 @@ class RunQueueService:
     async def list_events(self, run_id: str, *, after: int = 0) -> list[RunEvent]:
         return await self.store.list_events(run_id, after=after)
 
+    async def create_environment(
+        self,
+        *,
+        name: str,
+        definition: EnvironmentDefinition,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> EnvironmentProfile:
+        return await self.store.create_environment(
+            name=name,
+            definition=definition,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+        )
+
+    async def get_environment(self, environment_id: str) -> EnvironmentProfile | None:
+        return await self.store.get_environment(environment_id)
+
+    async def list_environments(self) -> list[EnvironmentProfile]:
+        return await self.store.list_environments()
+
     async def get_artifact(self, run_id: str, artifact_id: str) -> RunArtifact | None:
         return await self.store.get_artifact(run_id, artifact_id)
 
@@ -124,13 +146,24 @@ class RunQueueService:
             return
         await self.store.mark_running(run_id)
         await self._publish()
-        task = AgentTask(task_id=run.id, start_url=run.start_url, goal=run.goal)
+        environment = (
+            await self.store.get_environment(run.environment_id)
+            if run.environment_id
+            else None
+        )
+        task = AgentTask(
+            task_id=run.id,
+            start_url=run.start_url,
+            goal=run.goal,
+            environment_id=run.environment_id,
+        )
         try:
             result = (
                 await self.executor(task)
                 if self.executor
                 else await execute_agent_task(
                     task,
+                    environment=environment,
                     event_handler=lambda event: self._add_progress(run_id, event),
                 )
             )

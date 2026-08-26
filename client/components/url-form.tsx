@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
-import { Controller, useForm } from "react-hook-form"
+import { Controller, useForm, useWatch } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
 
@@ -23,7 +23,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
-import { useCreateRun } from "@/lib/runs"
+import { useCreateRun, useEnvironments } from "@/lib/runs"
 
 const formSchema = z.object({
   website: z.url({
@@ -34,22 +34,33 @@ const formSchema = z.object({
     .trim()
     .min(10, "Instructions must be at least 10 characters.")
     .max(2000, "Instructions must be 2,000 characters or fewer."),
+  environment_id: z.string(),
 })
 
 export function URLForm() {
   const createRun = useCreateRun()
+  const environments = useEnvironments()
   const router = useRouter()
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       website: "",
       instructions: "",
+      environment_id: "",
     },
+  })
+  const environmentId = useWatch({
+    control: form.control,
+    name: "environment_id",
   })
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     createRun.mutate(
-      { start_url: values.website, goal: values.instructions },
+      {
+        start_url: values.website,
+        goal: values.instructions,
+        environment_id: values.environment_id || undefined,
+      },
       {
         onSuccess: ({ id }) => {
           toast.success("Task queued", { description: `Run ${id}` })
@@ -62,6 +73,10 @@ export function URLForm() {
       }
     )
   }
+
+  const selectedEnvironment = environments.data?.find(
+    (environment) => environment.id === environmentId
+  )
 
   return (
     <Card className="w-full">
@@ -110,6 +125,37 @@ export function URLForm() {
                   {fieldState.invalid && (
                     <FieldError errors={[fieldState.error]} />
                   )}
+                </Field>
+              )}
+            />
+            <Controller
+              control={form.control}
+              name="environment_id"
+              render={({ field }) => (
+                <Field>
+                  <FieldLabel htmlFor="environment">Environment</FieldLabel>
+                  <select
+                    {...field}
+                    id="environment"
+                    className="h-9 w-full border bg-background px-3 text-sm"
+                  >
+                    <option value="">Default browser environment</option>
+                    {environments.data?.map((environment) => (
+                      <option key={environment.id} value={environment.id}>
+                        {environment.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedEnvironment &&
+                    Object.keys(selectedEnvironment.definition.secrets).length >
+                      0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Secrets:{" "}
+                        {Object.keys(selectedEnvironment.definition.secrets)
+                          .map((name) => `{{secret:${name}}}`)
+                          .join(", ")}
+                      </p>
+                    )}
                 </Field>
               )}
             />

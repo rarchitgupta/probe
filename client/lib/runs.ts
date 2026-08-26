@@ -21,7 +21,30 @@ export type FailureCategory =
 export type CreateRunInput = {
   start_url: string
   goal: string
+  environment_id?: string
 }
+
+export type EnvironmentValue = { value: string } | { env: string }
+
+export type TestEnvironment = {
+  id: string
+  name: string
+  definition: {
+    headers: Record<string, EnvironmentValue>
+    cookies: Array<{
+      name: string
+      value: EnvironmentValue
+      domain?: string | null
+      path?: string
+    }>
+    secrets: Record<string, string>
+  }
+  viewport_width: number
+  viewport_height: number
+  created_at: string
+}
+
+export type CreateEnvironmentInput = Omit<TestEnvironment, "id" | "created_at">
 
 export type RunUsage = {
   input_tokens: number | null
@@ -74,6 +97,7 @@ export type Run = {
   result: RunResult | null
   error: string | null
   failure_category: FailureCategory | null
+  environment_id: string | null
 }
 
 export type RunListItem = Pick<
@@ -131,6 +155,22 @@ export async function getRun(runId: string): Promise<Run> {
 
 export async function getRuns(): Promise<RunListItem[]> {
   return responseJson(await fetch(`${API_URL}/runs`))
+}
+
+export async function getEnvironments(): Promise<TestEnvironment[]> {
+  return responseJson(await fetch(`${API_URL}/environments`))
+}
+
+export async function createEnvironment(
+  input: CreateEnvironmentInput
+): Promise<TestEnvironment> {
+  return responseJson(
+    await fetch(`${API_URL}/environments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+  )
 }
 
 export async function getRunEvents(runId: string): Promise<RunEvent[]> {
@@ -192,6 +232,19 @@ export function useRuns() {
   }, [queryClient])
 
   return query
+}
+
+export function useEnvironments() {
+  return useQuery({ queryKey: ["environments"], queryFn: getEnvironments })
+}
+
+export function useCreateEnvironment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: createEnvironment,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["environments"] }),
+  })
 }
 
 export function useRunEvents(runId: string) {

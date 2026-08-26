@@ -5,6 +5,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -82,6 +83,17 @@ failure_category_type = Enum(
 timestamp_type = UTCDateTime()
 
 
+class TestEnvironmentRecord(Base):
+    __tablename__ = "test_environments"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    definition: Mapped[dict[str, object]] = mapped_column(JSON)
+    viewport_width: Mapped[int]
+    viewport_height: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)
+
+
 class TaskRunRecord(Base):
     __tablename__ = "task_runs"
     __table_args__ = (
@@ -98,6 +110,9 @@ class TaskRunRecord(Base):
     title: Mapped[str | None] = mapped_column(String(60))
     start_url: Mapped[str] = mapped_column(Text)
     goal: Mapped[str] = mapped_column(Text)
+    environment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("test_environments.id", ondelete="SET NULL")
+    )
     status: Mapped[RunStatus] = mapped_column(run_status_type)
     created_at: Mapped[datetime] = mapped_column(timestamp_type, default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(timestamp_type)

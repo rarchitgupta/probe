@@ -32,6 +32,7 @@ from qa_agent.agent import (
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser import BrowserSession
 from qa_agent.configuration import AgentConfiguration
+from qa_agent.environments import EnvironmentProfile, resolve_environment
 from qa_agent.failures import FailureCategory
 from qa_agent.llm import (
     DEEPSEEK_MODEL_NAME,
@@ -83,6 +84,7 @@ async def execute_agent_task(
     artifact_root: Path = Path(".runs"),
     event_handler: ProgressHandler | None = None,
     final_page_handler: FinalPageHandler | None = None,
+    environment: EnvironmentProfile | None = None,
 ) -> AgentTaskResult:
     keep_diagnostics = os.getenv("PROBE_DIAGNOSTICS", "").lower() in {
         "1",
@@ -112,11 +114,15 @@ async def execute_agent_task(
             else DEEPSEEK_MODEL_NAME
         )
     )
-
     try:
+        resolved_environment = resolve_environment(environment, str(task.start_url))
         async with asyncio.timeout(guard.remaining_seconds):
             async with BrowserSession(
-                trace_path=artifacts.trace, video_path=artifacts.video
+                trace_path=artifacts.trace,
+                video_path=artifacts.video,
+                headers=resolved_environment.headers,
+                cookies=resolved_environment.cookies,
+                viewport=resolved_environment.viewport,
             ) as browser:
                 execution_started = perf_counter()
                 try:
@@ -130,6 +136,7 @@ async def execute_agent_task(
                     deps = AgentDeps(
                         browser,
                         guard,
+                        secrets=resolved_environment.secrets,
                         elements={
                             element.id: element for element in initial_state.elements
                         },
@@ -152,8 +159,18 @@ async def execute_agent_task(
                         else nullcontext()
                     )
                     with trace_context:
+                        spec_goal = task.goal
+                        if resolved_environment.secrets:
+                            aliases = ", ".join(
+                                f"{{{{secret:{name}}}}}"
+                                for name in resolved_environment.secrets
+                            )
+                            spec_goal += (
+                                "\nAvailable secret placeholders (copy literally when "
+                                f"needed): {aliases}"
+                            )
                         spec_run = await spec_agent.run(
-                            task.goal,
+                            spec_goal,
                             model=selected_model,
                             model_settings=None if model else DEEPSEEK_SETTINGS,
                             usage_limits=usage_limits,
