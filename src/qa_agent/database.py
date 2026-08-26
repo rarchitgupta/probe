@@ -5,7 +5,7 @@ import os
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///.probe/probe.db"
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://probe:probe@localhost:5432/probe"
 
 
 class Base(DeclarativeBase):

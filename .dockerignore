@@ -1,0 +1,11 @@
+.git
+.github
+.venv
+.env
+.probe
+.runs
+.eval-runs
+.eval-reports
+client
+__pycache__
+*.pyc

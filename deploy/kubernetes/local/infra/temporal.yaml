@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+spec:
+  selector:
+    app: temporal
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: grpc
+    - name: ui
+      port: 8233
+      targetPort: ui
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: temporal
+spec:
+  serviceName: temporal
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+  template:
+    metadata:
+      labels:
+        app: temporal
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: temporal
+          image: temporalio/temporal:1.8.2
+          args:
+            - server
+            - start-dev
+            - --ip
+            - 0.0.0.0
+            - --db-filename
+            - /home/temporal/temporal.db
+            - --namespace
+            - probe
+            - --ui-disable-news-fetch
+          ports:
+            - name: grpc
+              containerPort: 7233
+            - name: ui
+              containerPort: 8233
+          readinessProbe:
+            exec:
+              command: ["temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /home/temporal
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

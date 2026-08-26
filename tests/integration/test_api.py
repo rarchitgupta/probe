@@ -16,21 +16,24 @@ from qa_agent.runs import (
     RunArtifact,
     RunEvent,
     RunEventKind,
-    RunQueueService,
     RunStatus,
     TaskRun,
+    TemporalRunService,
 )
 
 
 class TestApiLifespan:
-    async def test_starts_and_closes_run_queue(self) -> None:
-        queue = Mock(spec=RunQueueService)
+    async def test_starts_and_closes_run_service(self) -> None:
+        queue = Mock(spec=TemporalRunService)
         queue.start = AsyncMock()
         queue.close = AsyncMock()
 
-        with patch("qa_agent.api.RunQueueService", return_value=queue):
+        with patch(
+            "qa_agent.api.TemporalRunService.connect",
+            new=AsyncMock(return_value=queue),
+        ):
             async with lifespan(app):
-                assert app.state.run_queue is queue
+                assert app.state.run_service is queue
                 queue.start.assert_awaited_once()
                 queue.close.assert_not_awaited()
 
@@ -48,14 +51,17 @@ class TestCreateRun:
             viewport_height=768,
             created_at=created_at,
         )
-        queue = Mock(spec=RunQueueService)
+        queue = Mock(spec=TemporalRunService)
         queue.start = AsyncMock()
         queue.close = AsyncMock()
         queue.create_environment = AsyncMock(return_value=environment)
         queue.list_environments = AsyncMock(return_value=[environment])
 
         with (
-            patch("qa_agent.api.RunQueueService", return_value=queue),
+            patch(
+                "qa_agent.api.TemporalRunService.connect",
+                new=AsyncMock(return_value=queue),
+            ),
             TestClient(app) as client,
         ):
             created = client.post(
@@ -75,12 +81,15 @@ class TestCreateRun:
         assert listed.json() == [created.json()]
 
     def test_allows_cors_from_local_frontend(self) -> None:
-        queue = Mock(spec=RunQueueService)
+        queue = Mock(spec=TemporalRunService)
         queue.start = AsyncMock()
         queue.close = AsyncMock()
 
         with (
-            patch("qa_agent.api.RunQueueService", return_value=queue),
+            patch(
+                "qa_agent.api.TemporalRunService.connect",
+                new=AsyncMock(return_value=queue),
+            ),
             TestClient(app) as client,
         ):
             allowed = client.options(
@@ -174,6 +183,7 @@ class TestCreateRun:
                     id="artifact-1",
                     run_id="run-2",
                     kind="video",
+                    storage="local",
                     path=str(video),
                     content_type="video/webm",
                     size_bytes=video.stat().st_size,
@@ -192,7 +202,7 @@ class TestCreateRun:
             submitted.append(task)
             return run if len(submitted) == 1 else rerun
 
-        queue = Mock(spec=RunQueueService)
+        queue = Mock(spec=TemporalRunService)
         queue.start = AsyncMock()
         queue.close = AsyncMock()
         queue.submit = AsyncMock(side_effect=submit)
@@ -237,7 +247,10 @@ class TestCreateRun:
         )
 
         with (
-            patch("qa_agent.api.RunQueueService", return_value=queue),
+            patch(
+                "qa_agent.api.TemporalRunService.connect",
+                new=AsyncMock(return_value=queue),
+            ),
             TestClient(app) as client,
         ):
             response = client.post(

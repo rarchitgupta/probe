@@ -12,7 +12,7 @@ production concepts well.
 - [x] Bounded planning, deterministic actions, assertions, and execution policy
 - [x] DeepSeek integration with token, request, action, and timeout limits
 - [x] Langfuse traces, screenshots, Playwright traces, usage, and cost reporting
-- [x] Async SQLAlchemy, SQLite, Alembic, and a single-worker queue
+- [x] Async SQLAlchemy, PostgreSQL, Alembic, and Temporal orchestration
 - [x] FastAPI API and Next.js interface with live run events and results
 - [x] Pytest unit and browser integration suites in CI
 - [x] Versioned evaluation cases with independent final-state grading
@@ -71,18 +71,18 @@ Use benchmark failures—not speculation—to choose the next browser capabiliti
 
 ## 3. Durable queue and production data
 
-Keep the current `asyncio.Queue` until Probe needs multiple processes or restart-safe
-execution, then make one deliberate infrastructure transition.
+Use Temporal as the single durable execution system while PostgreSQL remains the
+queryable UI read model.
 
-- [ ] Move application data from SQLite to PostgreSQL when concurrent workers need
-  it; retain Alembic migrations.
-- [ ] Move screenshots, videos, and traces to S3-compatible object storage rather
-  than the relational database.
-- [ ] Separate the API and browser worker processes.
-- [ ] Evaluate Temporal when runs must survive process restarts and need durable
-  retries, cancellation, scheduling, and workflow history.
-- [ ] If adopted, model a browser run as one bounded Temporal activity or child
-  workflow—not one retryable activity per click.
+- [x] Move application data from SQLite to PostgreSQL and retain Alembic migrations.
+- [x] Move replay videos to S3-compatible object storage rather than the relational
+  database.
+- [ ] Move screenshots and Playwright traces to object storage when exposed in the UI.
+- [x] Separate the API and browser worker processes.
+- [x] Adopt Temporal for restart-safe execution, durable queues, cancellation, and
+  workflow history.
+- [x] Model a browser run as one bounded, heartbeating Temporal activity—not one
+  retryable activity per click.
 - [ ] Add idempotent submission, worker draining, concurrency limits, backpressure,
   and recovery tests.
 
@@ -95,10 +95,12 @@ execution system is enough.
   model, and browser execution while retaining Langfuse for agent traces.
 - [ ] Export practical metrics: queue depth, success and false-pass rates, latency,
   browser crashes, token usage, and cost.
-- [ ] Containerize the backend, frontend, and Playwright worker with pinned versions.
-- [ ] Provide Docker Compose for local production-like deployment.
-- [ ] Deploy the API and workers to Kubernetes with health checks, resource limits,
-  graceful shutdown, and queue-based autoscaling.
+- [x] Containerize the backend, frontend, and Playwright worker with pinned versions.
+- [x] Provide Docker Compose for local production-like deployment.
+- [x] Provide a repeatable local kind deployment with separate API and worker
+  workloads, health checks, resource limits, graceful shutdown, and setup Jobs.
+- [ ] Add queue-based worker autoscaling only if Probe is deployed beyond local
+  development.
 - [ ] Add object-retention cleanup, backup/restore notes, and short operational
   runbooks for model, browser, database, and worker failures.
 

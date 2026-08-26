@@ -171,6 +171,7 @@ class RunArtifactRecord(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(String(32))
+    storage: Mapped[str] = mapped_column(String(16), default="local")
     path: Mapped[str] = mapped_column(Text)
     content_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int] = mapped_column(Integer)
