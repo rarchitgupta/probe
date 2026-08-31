@@ -1,89 +1,80 @@
 # Probe
 
-Probe is an AI-powered browser QA agent. Give it a website and a plain-English
-test goal; it plans a bounded workflow, operates Chromium through Playwright,
-verifies the outcome, and records evidence.
+Probe is a full-stack AI browser QA platform. Submit a website and a plain-English
+test goal; Probe plans a bounded workflow, operates Chromium, verifies the result,
+and streams progress, evidence, cost, and a video replay to the UI.
 
-The current implementation includes:
+It is built around a text-first agent: semantic DOM observations and structured
+Pydantic AI outputs guide Playwright, while deterministic Python enforces actions,
+assertions, origin restrictions, and execution limits. This keeps vision usage and
+LLM cost low without allowing model-generated code to control the browser.
 
-- semantic, text-first browser observations instead of screenshot-heavy prompts;
-- structured planning and browser actions powered by Pydantic AI and DeepSeek;
-- execution limits, origin restrictions, and deterministic assertions;
-- screenshots, Playwright traces, diagnostics, token usage, and cost reporting;
-- PostgreSQL run state, Temporal orchestration, and a separate browser worker.
+## What it includes
 
-## Setup
+- Next.js interface for submitting, monitoring, cancelling, and rerunning QA tasks
+- FastAPI API with Server-Sent Events for live run and queue updates
+- Temporal workflows with a separate, concurrency-limited browser worker
+- PostgreSQL run history and S3-compatible replay storage through local MinIO
+- Named test environments for headers, cookies, viewport, and secret references
+- Versioned prompts, failure categories, Langfuse traces, token usage, and cost
+- Repeated-trial evaluation suites with JSON reports and baseline comparisons
+- Docker Compose and local kind/Kubernetes deployments
+
+## Quick start
+
+Requirements: Docker and a DeepSeek API key.
+
+```bash
+cp .env.example .env
+# Add DEEPSEEK_API_KEY to .env
+docker compose up --build
+```
+
+Open the app at http://localhost:3000. The API documentation is available at
+http://localhost:8000/docs, MinIO at http://localhost:9001, and Temporal at
+http://localhost:8233.
+
+Stop the stack with `docker compose down`. Add `-v` only when you also want to
+delete its PostgreSQL, MinIO, and Temporal data.
+
+## CLI and evaluations
+
+Install the local development environment:
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env
-docker compose up -d postgres
-uv run alembic upgrade head
 ```
 
-Add your `DEEPSEEK_API_KEY` to `.env`. Langfuse configuration is optional.
-
-## Docker
-
-Start the complete production-style stack:
-
-```bash
-docker compose up --build
-```
-
-Probe is available at http://localhost:3000, its API at http://localhost:8000,
-the MinIO console at http://localhost:9001, and the local Temporal UI at
-http://localhost:8233. Compose runs the database migration and creates the
-private artifact bucket before starting the API. Set
-`PROBE_CONTAINER_DATABASE_URL` to use a remote PostgreSQL database. The `S3_*`
-variables support MinIO, Cloudflare R2, AWS S3, and compatible services.
-
-## Local Kubernetes
-
-Run the same services in a local [kind](https://kind.sigs.k8s.io/) cluster with
-plain Kustomize manifests:
-
-```bash
-./scripts/kind-up.sh
-```
-
-The script builds and loads the local images, creates the application secret
-from `.env`, starts PostgreSQL, MinIO, and Temporal, runs database and bucket
-setup Jobs, and then deploys the API, one browser worker, and the client. It
-requires Docker, kind, kubectl, and ripgrep.
-
-Services remain private to the cluster. Forward only the ones you need:
-
-```bash
-kubectl -n probe port-forward service/probe-client 3000:3000
-kubectl -n probe port-forward service/probe-api 8000:8000
-kubectl -n probe port-forward service/minio 9000:9000 9001:9001
-kubectl -n probe port-forward service/temporal 8233:8233
-```
-
-Inspect pods with `kubectl -n probe get pods` and remove the entire local
-cluster, including its persistent volumes, with `./scripts/kind-down.sh`.
-
-## Run a QA task
+Run one task directly:
 
 ```bash
 uv run probe run https://www.saucedemo.com/ \
   "Log in and verify that the inventory page loads"
 ```
 
-Use `--json` for machine-readable output. The API uses Temporal; `--queued`
-retains the lightweight in-process queue for standalone CLI runs:
+Run the reproducible SauceDemo benchmark and optionally compare it with a baseline:
 
 ```bash
-uv run probe run https://www.saucedemo.com/ \
-  "Log in and verify that the inventory page loads" \
-  --queued --json
+uv run probe eval evals/suites/saucedemo-smoke.json --trials 3
+uv run probe eval evals/suites/saucedemo-smoke.json --trials 3 \
+  --baseline .eval-reports/baseline.json
 ```
 
-Run artifacts are written to `.runs/<task-id>/`. Local task state is stored in
-the PostgreSQL service from `compose.yaml`. Set `PROBE_DATABASE_URL` to an async
-SQLAlchemy URL for a remote PostgreSQL instance when deployed.
+## Local Kubernetes
+
+With Docker, kind, kubectl, and ripgrep installed:
+
+```bash
+./scripts/kind-up.sh
+kubectl -n probe port-forward service/probe-client 3000:3000
+kubectl -n probe port-forward service/probe-api 8000:8000
+```
+
+The script builds and loads local images, provisions PostgreSQL, MinIO, and
+Temporal, runs setup Jobs, and deploys the API, client, and one browser worker.
+Inspect it with `kubectl -n probe get pods`; delete the cluster and its data with
+`./scripts/kind-down.sh`.
 
 ## Development
 
@@ -91,8 +82,7 @@ SQLAlchemy URL for a remote PostgreSQL instance when deployed.
 uv run ruff check src tests
 uv run ty check src tests
 uv run pytest
+cd client && bun run lint && bun run build
 ```
 
-Set `PROBE_DIAGNOSTICS=true` in `.env` to retain successful action diagnostics.
-Run the Temporal worker outside Docker with
-`uv run python -m qa_agent.temporal_worker`.
+See [ROADMAP.md](ROADMAP.md) for deliberate limitations and remaining work.
