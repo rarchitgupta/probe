@@ -1,4 +1,5 @@
 import { Geist_Mono, Inter } from "next/font/google"
+import type { Metadata } from "next"
 
 import "./globals.css"
 import { Providers } from "@/app/providers"
@@ -20,6 +21,15 @@ const fontMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
 })
+
+export const metadata: Metadata = {
+  title: {
+    default: "Probe",
+    template: "%s | Probe",
+  },
+  description: "AI-powered browser QA from plain-English test goals.",
+  applicationName: "Probe",
+}
 
 export default function RootLayout({
   children,

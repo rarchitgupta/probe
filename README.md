@@ -9,6 +9,8 @@ Pydantic AI outputs guide Playwright, while deterministic Python enforces action
 assertions, origin restrictions, and execution limits. This keeps vision usage and
 LLM cost low without allowing model-generated code to control the browser.
 
+[Watch the Probe demo](assets/ProbeDemo.mp4)
+
 ## What it includes
 
 - Next.js interface for submitting, monitoring, cancelling, and rerunning QA tasks

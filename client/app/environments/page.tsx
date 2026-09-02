@@ -1,5 +1,12 @@
+import type { Metadata } from "next"
+
 import { EnvironmentForm } from "@/components/environment-form"
 import { EnvironmentList } from "@/components/environment-list"
+
+export const metadata: Metadata = {
+  title: "Environments",
+  description: "Manage reusable browser configurations for Probe runs.",
+}
 
 export default function EnvironmentsPage() {
   return (
