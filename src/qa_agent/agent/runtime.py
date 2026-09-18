@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -11,9 +12,13 @@ from qa_agent.agent.planning import (
     ElementState,
     FillFormInstruction,
     FormField,
+    PinnedCheck,
     ProgressEntry,
+    RegionContainsCheck,
     ScrollInstruction,
+    TaskInput,
     ToolResult,
+    WaitInstruction,
     page_state,
 )
 from qa_agent.assertions import (
@@ -21,6 +26,7 @@ from qa_agent.assertions import (
     BrowserAssertion,
     CheckedAssertion,
     DialogMessageAssertion,
+    RegionContainsAssertion,
     SelectedOptionAssertion,
     TextVisibleAssertion,
     TitleEqualsAssertion,
@@ -63,9 +69,10 @@ class AgentDeps:
         default_factory=dict
     )
     sensitive_values: set[str] = field(default_factory=set)
-    successful_actions: set[tuple[object, ...]] = field(default_factory=set)
     failure_category: FailureCategory | None = None
     secrets: dict[str, str] = field(default_factory=dict)
+    task_inputs: dict[str, TaskInput] = field(default_factory=dict)
+    successful_field_updates: set[tuple[str, str, str]] = field(default_factory=set)
 
 
 async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolResult:
@@ -79,7 +86,28 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
                 error=f"Unknown element ID {form_field.element_id}",
                 failure_category=deps.failure_category,
             )
-        if isinstance(form_field.value, bool) and target.role not in {
+        if form_field.input_id is not None:
+            if target.role not in {"textbox", "spinbutton", "combobox"}:
+                deps.failure_category = FailureCategory.ACTION_FAILURE
+                return ToolResult(
+                    success=False,
+                    error=f"Element {target.id} ({target.name!r}) is not a text or select field; re-observe before filling",
+                    failure_category=deps.failure_category,
+                )
+            task_input = deps.task_inputs.get(form_field.input_id)
+            if not task_input:
+                deps.failure_category = FailureCategory.ACTION_FAILURE
+                return ToolResult(
+                    success=False,
+                    error=f"Unknown task input {form_field.input_id!r}",
+                    failure_category=deps.failure_category,
+                )
+            value: str | bool = resolve_secret(task_input.value, deps.secrets)
+            if task_input.sensitive:
+                deps.sensitive_values.add(value)
+        else:
+            value = bool(form_field.value)
+        if isinstance(value, bool) and target.role not in {
             "checkbox",
             "radio",
         }:
@@ -89,22 +117,17 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
                 error=f"Element {form_field.element_id} is not checkable",
                 failure_category=deps.failure_category,
             )
-        if target.role == "radio" and form_field.value is False:
+        if target.role == "radio" and value is False:
             deps.failure_category = FailureCategory.ACTION_FAILURE
             return ToolResult(
                 success=False,
                 error="Radio buttons cannot be unchecked",
                 failure_category=deps.failure_category,
             )
-        targets.append((target, form_field.value))
+        targets.append((target, value))
 
     result = ToolResult(success=True)
-    executed = False
     for target, value in targets:
-        if isinstance(value, str):
-            value = resolve_secret(value, deps.secrets)
-            if value in deps.secrets.values():
-                deps.sensitive_values.add(value)
         matches = [
             element
             for element in deps.elements.values()
@@ -119,22 +142,7 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
                 failure_category=deps.failure_category,
             )
         element_id = matches[0].id
-        action_name = (
-            "set_checked"
-            if isinstance(value, bool)
-            else "select_option"
-            if target.role == "combobox"
-            else "fill"
-        )
-        action_key = (
-            action_name,
-            target.role,
-            target.name,
-            target.input_type,
-            value,
-        )
-        if action_key in deps.successful_actions:
-            continue
+        field_url = deps.browser.page.url if deps.browser.page else ""
         if isinstance(value, bool):
             result = await _execute(
                 deps, SetCheckedAction("set_checked", element_id, value)
@@ -147,16 +155,8 @@ async def perform_fill_form(deps: AgentDeps, fields: list[FormField]) -> ToolRes
             result = await _execute(deps, FillAction("fill", element_id, value))
         if not result.success:
             return result
-        executed = True
-        deps.successful_actions.add(action_key)
-    if executed:
-        return result
-    deps.failure_category = FailureCategory.ACTION_FAILURE
-    return ToolResult(
-        success=False,
-        error="These fields were already completed; choose another action or finish the step",
-        failure_category=deps.failure_category,
-    )
+        deps.successful_field_updates.add((field_url, target.role, target.name))
+    return result
 
 
 async def _execute(
@@ -244,12 +244,29 @@ async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResu
     else:
         result = await deps.browser.assert_that(assertion)
     if result.success:
+        deps.failure_category = None
         deps.evidence.append(
             f"{result.assertion}: expected={result.expected!r}, actual={result.actual!r}"
         )
     else:
         deps.failure_category = FailureCategory.ASSERTION_FAILURE
     return result
+
+
+async def execute_check(deps: AgentDeps, check: PinnedCheck) -> AssertionResult:
+    if isinstance(check, RegionContainsCheck):
+        assertion: BrowserAssertion = RegionContainsAssertion(
+            "region_contains", check.anchor, tuple(check.expected)
+        )
+    elif check.assertion == "text_visible":
+        assertion = TextVisibleAssertion("text_visible", check.expected, check.exact)
+    elif check.assertion == "url_contains":
+        assertion = UrlContainsAssertion("url_contains", check.expected)
+    elif check.assertion == "title_equals":
+        assertion = TitleEqualsAssertion("title_equals", check.expected)
+    else:
+        assertion = DialogMessageAssertion("dialog_message", check.expected)
+    return await _assert(deps, assertion)
 
 
 async def execute_instructions(
@@ -267,24 +284,7 @@ async def execute_instructions(
                 if element and element.role in {"checkbox", "radio"}
                 else ClickAction("click", instruction.element_id)
             )
-            action_key = (
-                action.action,
-                element.role if element else None,
-                element.name if element else instruction.element_id,
-                element.input_type if element else None,
-                True if isinstance(action, SetCheckedAction) else None,
-            )
-            if action_key in deps.successful_actions:
-                deps.failure_category = FailureCategory.ACTION_FAILURE
-                result = ToolResult(
-                    success=False,
-                    error="This action was already completed; choose another action or finish the step",
-                    failure_category=deps.failure_category,
-                )
-            else:
-                result = await _execute(deps, action)
-                if result.success:
-                    deps.successful_actions.add(action_key)
+            result = await _execute(deps, action)
         elif isinstance(instruction, FillFormInstruction):
             names = [
                 deps.elements[form_field.element_id].name
@@ -296,6 +296,21 @@ async def execute_instructions(
         elif isinstance(instruction, ScrollInstruction):
             target = instruction.direction
             result = await _execute(deps, ScrollAction("scroll", instruction.direction))
+        elif isinstance(instruction, WaitInstruction):
+            try:
+                deps.guard.check_url(deps.browser.page.url if deps.browser.page else "")
+                deps.guard.record_action()
+                async with asyncio.timeout(deps.guard.remaining_seconds):
+                    await asyncio.sleep(1)
+                deps.guard.check_url(deps.browser.page.url if deps.browser.page else "")
+                result = ToolResult(success=True)
+            except PolicyViolation as exc:
+                deps.failure_category = FailureCategory.POLICY_VIOLATION
+                result = ToolResult(
+                    success=False,
+                    error=str(exc),
+                    failure_category=deps.failure_category,
+                )
         else:
             assertion: BrowserAssertion
             if isinstance(instruction, AssertionInstruction):
@@ -337,7 +352,9 @@ async def execute_instructions(
                 target=target,
                 success=result.success,
                 effect=(
-                    "page_may_have_changed"
+                    "waited"
+                    if isinstance(instruction, WaitInstruction)
+                    else "page_may_have_changed"
                     if isinstance(instruction, (ClickInstruction, ScrollInstruction))
                     else "asserted"
                     if not isinstance(instruction, FillFormInstruction)
@@ -347,7 +364,7 @@ async def execute_instructions(
             )
         )
         if not result.success or isinstance(
-            instruction, (ClickInstruction, ScrollInstruction)
+            instruction, (ClickInstruction, ScrollInstruction, WaitInstruction)
         ):
             break
     return progress, completed

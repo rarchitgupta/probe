@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
@@ -19,6 +20,53 @@ pytestmark = pytest.mark.browser
 
 
 class TestBrowserSession:
+    async def test_reobserves_after_target_disappears_during_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            async with BrowserSession(
+                trace_path=Path(directory) / "trace.zip"
+            ) as session:
+                await session.navigate(
+                    f"data:text/html,{quote('<label>Username<input></label>')}"
+                )
+                observation = await session.observe()
+                assert session.page is not None
+                # Simulate the SPA replacing the form after observation.
+                await session.page.evaluate(
+                    "document.body.innerHTML = '<button>Catalog</button>'"
+                )
+                async with asyncio.timeout(2):
+                    result = await session.execute(
+                        FillAction("fill", observation.elements[0].id, "user")
+                    )
+                assert not result.success
+                assert result.error is not None
+                assert "disappeared" in result.error
+                fresh = await session.observe()
+                assert fresh.elements[0].name == "Catalog"
+                assert (
+                    await session.execute(ClickAction("click", fresh.elements[0].id))
+                ).success
+
+    async def test_observes_control_rendered_on_next_animation_frame(self) -> None:
+        html = """
+            <button onclick="requestAnimationFrame(() => requestAnimationFrame(() => {
+                const button = document.createElement('button');
+                button.textContent = 'Increase quantity';
+                document.body.append(button);
+            }))">Open cart</button>
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            async with BrowserSession(
+                trace_path=Path(directory) / "trace.zip"
+            ) as session:
+                await session.navigate(f"data:text/html,{quote(html)}")
+                initial = await session.observe()
+                await session.execute(ClickAction("click", initial.elements[0].id))
+
+                observation = await session.observe()
+
+        assert "Increase quantity" in [element.name for element in observation.elements]
+
     async def test_records_and_dismisses_dialog(self) -> None:
         html = "<button onclick=\"alert('Message received!')\">Submit</button>"
         with tempfile.TemporaryDirectory() as directory:

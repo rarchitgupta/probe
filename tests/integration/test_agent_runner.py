@@ -51,16 +51,28 @@ class TestAgentRunner:
                             info.output_tools[0].name,
                             {
                                 "title": "Fill Example Form",
+                                "inputs": [
+                                    {
+                                        "id": "name",
+                                        "label": "name",
+                                        "value": "Ada",
+                                    }
+                                ],
                                 "steps": [
                                     {
                                         "id": 1,
                                         "kind": "action",
                                         "instruction": "Fill the name",
+                                        "input_ids": ["name"],
                                     },
                                     {
                                         "id": 2,
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
+                                        "check": {
+                                            "assertion": "title_equals",
+                                            "expected": "Never",
+                                        },
                                     },
                                 ],
                             },
@@ -76,7 +88,9 @@ class TestAgentRunner:
                                 "actions": [
                                     {
                                         "action": "fill_form",
-                                        "fields": [{"element_id": 1, "value": "Ada"}],
+                                        "fields": [
+                                            {"element_id": 1, "input_id": "name"}
+                                        ],
                                     }
                                 ],
                                 "step_complete": True,
@@ -95,7 +109,7 @@ class TestAgentRunner:
                 result = await execute_agent_task(
                     AgentTask(
                         task_id="timed-out-run",
-                        goal="Fill the form",
+                        goal="Fill the name with Ada",
                         start_url=f"http://127.0.0.1:{server.server_port}",
                     ),
                     model=FunctionModel(respond),
@@ -109,7 +123,7 @@ class TestAgentRunner:
         assert result.error == "Model request timed out after 60 seconds"
         assert result.failure_category == FailureCategory.MODEL_TIMEOUT
         assert result.configuration is not None
-        assert result.configuration.prompt_version == "1"
+        assert result.configuration.prompt_version == "6"
         assert result.configuration.model_config_version == "1"
         assert len(result.diagnostics) == 1
         assert result.diagnostics[0].action == "fill"
@@ -127,16 +141,33 @@ class TestAgentRunner:
                             info.output_tools[0].name,
                             {
                                 "title": "Fill Example Form",
+                                "inputs": [
+                                    {
+                                        "id": "name",
+                                        "label": "name",
+                                        "value": "Ada",
+                                    },
+                                    {
+                                        "id": "city",
+                                        "label": "city",
+                                        "value": "London",
+                                    },
+                                ],
                                 "steps": [
                                     {
                                         "id": 1,
                                         "kind": "action",
                                         "instruction": "Fill the form",
+                                        "input_ids": ["name", "city"],
                                     },
                                     {
                                         "id": 2,
                                         "kind": "assertion",
                                         "instruction": "Verify the title",
+                                        "check": {
+                                            "assertion": "title_equals",
+                                            "expected": "Form",
+                                        },
                                     },
                                 ],
                             },
@@ -153,8 +184,8 @@ class TestAgentRunner:
                                     {
                                         "action": "fill_form",
                                         "fields": [
-                                            {"element_id": 1, "value": "Ada"},
-                                            {"element_id": 2, "value": "London"},
+                                            {"element_id": 1, "input_id": "name"},
+                                            {"element_id": 2, "input_id": "city"},
                                         ],
                                     },
                                 ],
@@ -174,7 +205,7 @@ class TestAgentRunner:
                                     "expected": "Form",
                                 }
                             ],
-                            "step_complete": False,
+                            "step_complete": True,
                         },
                     )
                 ]
@@ -191,7 +222,7 @@ class TestAgentRunner:
                         "id": "fill-example-form",
                         "name": "Fill example form",
                         "start_url": f"http://127.0.0.1:{server.server_port}",
-                        "goal": "Fill the name and verify the form",
+                        "goal": "Fill the name with Ada and city with London, then verify the form",
                         "checks": [
                             {
                                 "assertion": "text_visible",
@@ -228,7 +259,7 @@ class TestAgentRunner:
         assert trial.duration_ms > 0
         assert saved["summary"] == "Completed all 2 test steps"
         assert saved["title"] == "Fill Example Form"
-        assert trial.usage["requests"] == 3
+        assert trial.usage["requests"] == 2
         assert saved["diagnostics"] == []
         assert "Ada" not in json.dumps(saved)
         assert "London" not in json.dumps(saved)

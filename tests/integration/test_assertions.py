@@ -7,6 +7,7 @@ from urllib.parse import quote
 import pytest
 
 from qa_agent.assertions import (
+    RegionContainsAssertion,
     TextVisibleAssertion,
     TitleEqualsAssertion,
     UrlContainsAssertion,
@@ -47,9 +48,24 @@ class TestBrowserAssertion:
                     timeout_ms=50,
                 )
 
+                assert session.page is not None
+                await session.page.set_content(
+                    "<section><h2>Mechanical Keyboard</h2><span>Quantity</span>"
+                    "<strong>2</strong></section><section><h2>Mouse</h2>"
+                    "<strong>1</strong></section>"
+                )
+                region = await session.assert_that(
+                    RegionContainsAssertion(
+                        "region_contains", "Mechanical Keyboard", ("Quantity", "2")
+                    )
+                )
+
         assert url_result.success
         assert title_result.success
         assert text_result.success
         assert not failure.success
         assert failure.actual is None
         assert "50 ms" in (failure.error or "")
+        assert region.success
+        assert isinstance(region.actual, str)
+        assert "Mechanical Keyboard" in region.actual

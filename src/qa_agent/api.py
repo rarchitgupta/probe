@@ -319,7 +319,7 @@ async def get_artifact_content(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
     storage = artifact_storage(artifact.storage)
     if url := storage.signed_url(artifact.path):
-        return RedirectResponse(url)
+        return RedirectResponse(url, headers={"Cache-Control": "no-store"})
     run_directory = Path(run.result.artifact_directory).resolve()
     path = Path(artifact.path).resolve()
     if not path.is_relative_to(run_directory) or not path.is_file():
@@ -418,7 +418,7 @@ def _run_response(run: TaskRun) -> RunResponse:
                 content_type=artifact.content_type,
                 size_bytes=artifact.size_bytes,
                 created_at=artifact.created_at,
-                url=f"/runs/{run.id}/artifacts/{artifact.id}/content",
+                url=(f"/runs/{run.id}/artifacts/{artifact.id}/content?v={artifact.id}"),
             )
             for artifact in run.artifacts
         ),

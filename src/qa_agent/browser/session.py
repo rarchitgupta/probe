@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from secrets import token_hex
 from types import TracebackType
@@ -31,6 +33,7 @@ from qa_agent.browser.observation import (
 from qa_agent.failures import FailureCategory
 
 MAX_RECORDED_ERRORS = 100
+ACTION_TIMEOUT_MS = 3_000
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,10 @@ class BrowserSession:
     async def observe(self) -> PageObservation:
         if not self.page:
             raise RuntimeError("BrowserSession must be entered before use")
+        await self.page.evaluate(
+            "() => new Promise(resolve => "
+            "requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
         self._element_refs.clear()
         candidates = self.page.locator(INTERACTIVE_SELECTOR)
         raw_observation = await candidates.evaluate_all(
@@ -173,12 +180,29 @@ class BrowserSession:
                 f'[{ELEMENT_REFERENCE_ATTRIBUTE}="{reference}"]'
             )
             elements.append(element)
+        title = await self.page.title()
         return PageObservation(
             url=self.page.url,
-            title=await self.page.title(),
+            title=title,
             elements=tuple(elements),
             can_scroll_up=raw_observation["can_scroll_up"],
             can_scroll_down=raw_observation["can_scroll_down"],
+            fingerprint=sha256(
+                json.dumps(
+                    {
+                        "url": self.page.url,
+                        "title": title,
+                        "text": raw_observation["text"],
+                        "scroll": raw_observation["scroll_position"],
+                        "elements": [
+                            {key: value for key, value in item.items() if key != "id"}
+                            for item in raw_observation["elements"]
+                        ],
+                    },
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest(),
+            text=raw_observation["text"][:3000],
         )
 
     async def execute(self, action: BrowserAction) -> ActionResult:
@@ -214,7 +238,15 @@ class BrowserSession:
             )
 
         try:
-            if not await locator.is_enabled():
+            if await locator.count() != 1:
+                return ActionResult(
+                    action.action,
+                    action.element_id,
+                    False,
+                    "Observed element disappeared; observe the page again",
+                    FailureCategory.ACTION_FAILURE,
+                )
+            if not await locator.is_enabled(timeout=ACTION_TIMEOUT_MS):
                 return ActionResult(
                     action=action.action,
                     element_id=action.element_id,
@@ -223,13 +255,15 @@ class BrowserSession:
                     failure_category=FailureCategory.ACTION_FAILURE,
                 )
             if isinstance(action, ClickAction):
-                await locator.click()
+                await locator.click(timeout=ACTION_TIMEOUT_MS)
             elif isinstance(action, FillAction):
-                await locator.fill(action.value)
+                await locator.fill(action.value, timeout=ACTION_TIMEOUT_MS)
             elif isinstance(action, SetCheckedAction):
-                await locator.set_checked(action.checked)
+                await locator.set_checked(action.checked, timeout=ACTION_TIMEOUT_MS)
             else:
-                await locator.select_option(label=action.label)
+                await locator.select_option(
+                    label=action.label, timeout=ACTION_TIMEOUT_MS
+                )
             return ActionResult(
                 action=action.action,
                 element_id=action.element_id,

@@ -319,7 +319,7 @@ class TestCreateRun:
             "content_type": "video/webm",
             "size_bytes": 11,
             "created_at": run.created_at.isoformat().replace("+00:00", "Z"),
-            "url": "/runs/run-2/artifacts/artifact-1/content",
+            "url": ("/runs/run-2/artifacts/artifact-1/content?v=artifact-1"),
         }
         assert video_response.status_code == 206
         assert video_response.content == b"probe"
@@ -347,7 +347,7 @@ class TestCreateRun:
         assert completed_json["result"]["usage"]["requests"] == 2
         assert completed_json["result"]["configuration"] == {
             "model": "test-model",
-            "prompt_version": "1",
+            "prompt_version": "6",
             "model_config_version": "1",
         }
         assert cancelled_response.status_code == 200

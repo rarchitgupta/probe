@@ -12,6 +12,24 @@ pytestmark = pytest.mark.browser
 
 
 class TestBrowserObservation:
+    async def test_fingerprint_tracks_content_and_scroll_not_reference_ids(
+        self, tmp_path
+    ) -> None:
+        html = '<button>Increase</button><output>1</output><div style="height:2000px"></div>'
+        async with BrowserSession(trace_path=tmp_path / "trace.zip") as browser:
+            await browser.navigate(f"data:text/html,{quote(html)}")
+            first = await browser.observe()
+            second = await browser.observe()
+            assert first.fingerprint == second.fingerprint
+            assert browser.page is not None
+            await browser.page.locator("output").evaluate("el => el.textContent = '2'")
+            updated = await browser.observe()
+            assert first.elements == updated.elements
+            assert first.fingerprint != updated.fingerprint
+            await browser.page.evaluate("scrollTo(0, 100)")
+            scrolled = await browser.observe()
+            assert scrolled.fingerprint != updated.fingerprint
+
     async def test_keeps_only_available_controls_and_names_image_links(self) -> None:
         html = """
             <style>

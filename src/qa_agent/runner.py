@@ -22,13 +22,12 @@ from qa_agent.agent import (
     AgentDeps,
     AgentTask,
     ProgressEntry,
-    build_step_prompt,
-    execute_instructions,
     page_state,
     sanitize_summary,
     spec_agent,
-    step_agent,
+    validate_task_inputs,
 )
+from qa_agent.agent.loop import run_plan
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser import BrowserSession
 from qa_agent.configuration import AgentConfiguration
@@ -46,12 +45,11 @@ from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation
 logger = logging.getLogger(__name__)
 
 AGENT_USAGE_LIMITS = UsageLimits(
-    request_limit=20,
+    request_limit=45,
     tool_calls_limit=15,
-    total_tokens_limit=30_000,
+    total_tokens_limit=100_000,  # Temporary budget for testing longer QA Demo flows.
 )
 AGENT_EXECUTION_POLICY = ExecutionPolicy(timeout_seconds=150)
-MAX_STEP_ROUNDS = 6
 ProgressHandler = Callable[[ProgressEntry], Awaitable[None]]
 FinalPageHandler = Callable[[Page], Awaitable[None]]
 
@@ -137,6 +135,7 @@ async def execute_agent_task(
                         browser,
                         guard,
                         secrets=resolved_environment.secrets,
+                        sensitive_values=set(resolved_environment.secrets.values()),
                         elements={
                             element.id: element for element in initial_state.elements
                         },
@@ -177,105 +176,27 @@ async def execute_agent_task(
                             usage=run_usage,
                         )
                         title = spec_run.output.title
-                        completed_steps = []
-                        for step in spec_run.output.steps:
-                            deps.successful_actions.clear()
-                            deps.failure_category = None
-                            progress: list[ProgressEntry] = []
-                            evidence_before = len(deps.evidence)
-                            for _ in range(MAX_STEP_ROUNDS):
-                                observation = await browser.observe()
-                                state = page_state(observation)
-                                deps.elements = {
-                                    element.id: element for element in state.elements
-                                }
-                                decision_run = await step_agent.run(
-                                    build_step_prompt(
-                                        step,
-                                        completed_steps,
-                                        progress,
-                                        observation,
-                                    ),
-                                    model=selected_model,
-                                    model_settings=None if model else DEEPSEEK_SETTINGS,
-                                    usage_limits=usage_limits,
-                                    usage=run_usage,
-                                )
-                                decision = decision_run.output
-                                if decision.failure:
-                                    status = "blocked" if decision.blocked else "failed"
-                                    failure_category = deps.failure_category or (
-                                        FailureCategory.ASSERTION_FAILURE
-                                        if step.kind == "assertion"
-                                        else FailureCategory.ACTION_FAILURE
-                                    )
-                                    summary = sanitize_summary(
-                                        decision.failure, deps.sensitive_values
-                                    )
-                                    break
-
-                                batch_progress, executed = await execute_instructions(
-                                    deps, decision.actions
-                                )
-                                if event_handler:
-                                    for event in batch_progress:
-                                        await event_handler(event)
-                                progress.extend(batch_progress)
-                                batch_succeeded = all(
-                                    entry.success for entry in batch_progress
-                                )
-                                batch_finished = executed == len(decision.actions)
-                                assertion_proved = (
-                                    step.kind != "assertion"
-                                    or len(deps.evidence) > evidence_before
-                                )
-                                action_proved = step.kind != "action" or any(
-                                    entry.success for entry in progress
-                                )
-                                assertion_batch_completed = (
-                                    step.kind == "assertion"
-                                    and bool(batch_progress)
-                                    and batch_finished
-                                    and batch_succeeded
-                                    and all(
-                                        entry.effect == "asserted"
-                                        for entry in batch_progress
-                                    )
-                                )
-                                if (
-                                    (
-                                        decision.step_complete
-                                        or assertion_batch_completed
-                                    )
-                                    and batch_succeeded
-                                    and batch_finished
-                                    and assertion_proved
-                                    and action_proved
-                                ):
-                                    completed_steps.append(step)
-                                    break
-                                if decision.step_complete and not assertion_proved:
-                                    progress.append(
-                                        ProgressEntry(
-                                            action="assertion_required",
-                                            success=False,
-                                            error="Run a successful assertion for this step",
-                                        )
-                                    )
-                            else:
-                                status = "failed"
-                                failure_category = deps.failure_category or (
-                                    FailureCategory.ASSERTION_FAILURE
-                                    if step.kind == "assertion"
-                                    else FailureCategory.ACTION_FAILURE
-                                )
-                                summary = f"Step {step.id} exceeded its execution limit"
-
-                            if status in {"failed", "blocked"}:
-                                break
-                        else:
-                            status = "passed"
-                            summary = f"Completed all {len(completed_steps)} test steps"
+                        task_inputs = validate_task_inputs(
+                            spec_run.output,
+                            task.goal,
+                            set(resolved_environment.secrets),
+                        )
+                        deps.task_inputs = task_inputs
+                        deps.sensitive_values.update(
+                            task_input.value
+                            for task_input in task_inputs.values()
+                            if task_input.sensitive and task_input.value in task.goal
+                        )
+                        status, summary = await run_plan(
+                            spec_run.output,
+                            deps,
+                            model=selected_model,
+                            model_settings=None if model else DEEPSEEK_SETTINGS,
+                            usage=run_usage,
+                            usage_limits=usage_limits,
+                            event_handler=event_handler,
+                        )
+                        failure_category = deps.failure_category
 
                         evidence = tuple(deps.evidence)
                     diagnostics = tuple(deps.diagnostics)

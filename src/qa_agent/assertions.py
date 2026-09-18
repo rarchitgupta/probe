@@ -32,6 +32,13 @@ class TextVisibleAssertion:
 
 
 @dataclass(frozen=True, config=ASSERTION_CONFIG)
+class RegionContainsAssertion:
+    assertion: Literal["region_contains"]
+    anchor: ExpectedText
+    expected: tuple[ExpectedText, ...]
+
+
+@dataclass(frozen=True, config=ASSERTION_CONFIG)
 class CheckedAssertion:
     assertion: Literal["checked"]
     element_id: int
@@ -51,7 +58,12 @@ class DialogMessageAssertion:
     expected: ExpectedText
 
 
-PageAssertion = UrlContainsAssertion | TitleEqualsAssertion | TextVisibleAssertion
+PageAssertion = (
+    UrlContainsAssertion
+    | TitleEqualsAssertion
+    | TextVisibleAssertion
+    | RegionContainsAssertion
+)
 ElementAssertion = CheckedAssertion | SelectedOptionAssertion
 BrowserAssertion = PageAssertion | ElementAssertion | DialogMessageAssertion
 
@@ -62,12 +74,13 @@ class AssertionResult:
         "url_contains",
         "title_equals",
         "text_visible",
+        "region_contains",
         "checked",
         "selected_option",
         "dialog_message",
     ]
     success: bool
-    expected: str | bool
+    expected: str | bool | tuple[str, ...]
     actual: str | bool | None
     error: str | None = None
 
@@ -78,6 +91,11 @@ async def evaluate_assertion(
     *,
     timeout_ms: float = 5_000,
 ) -> AssertionResult:
+    expected: str | tuple[str, ...] = (
+        (assertion.anchor, *assertion.expected)
+        if isinstance(assertion, RegionContainsAssertion)
+        else assertion.expected
+    )
     try:
         if isinstance(assertion, UrlContainsAssertion):
             await page.wait_for_url(
@@ -94,15 +112,42 @@ async def evaluate_assertion(
             )
             actual = await page.title()
             success = actual == assertion.expected
-        else:
+        elif isinstance(assertion, TextVisibleAssertion):
             locator = page.get_by_text(assertion.expected, exact=assertion.exact).first
             await locator.wait_for(state="visible", timeout=timeout_ms)
             actual = await locator.inner_text()
             success = True
+        else:
+            actual = await page.locator("body *").evaluate_all(
+                r"""
+                (elements, requirement) => {
+                    const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+                    const expected = [requirement.anchor, ...requirement.expected];
+                    const candidates = elements
+                        .map(element => ({element, text: normalize(element.innerText)}))
+                        .filter(({element, text}) => {
+                            const style = getComputedStyle(element);
+                            return element.getClientRects().length > 0
+                                && style.visibility !== 'hidden'
+                                && style.display !== 'none'
+                                && expected.every(value => text.includes(value));
+                        })
+                        .sort((left, right) => left.text.length - right.text.length);
+                    const match = candidates[0];
+                    if (!match) return null;
+                    match.element.scrollIntoView({block: 'center', inline: 'nearest'});
+                    return match.text;
+                }
+                """,
+                {"anchor": assertion.anchor, "expected": assertion.expected},
+            )
+            success = actual is not None
+            if not success:
+                raise PlaywrightTimeoutError("No matching visible region")
         return AssertionResult(
             assertion=assertion.assertion,
             success=success,
-            expected=assertion.expected,
+            expected=expected,
             actual=actual,
             error=None if success else "Observed value did not match",
         )
@@ -111,7 +156,7 @@ async def evaluate_assertion(
         return AssertionResult(
             assertion=assertion.assertion,
             success=False,
-            expected=assertion.expected,
+            expected=expected,
             actual=actual,
             error=f"Condition was not met within {timeout_ms:g} ms",
         )

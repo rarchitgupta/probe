@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "6"
 MODEL_CONFIG_VERSION = "1"
 
 

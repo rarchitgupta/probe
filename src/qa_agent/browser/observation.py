@@ -168,6 +168,8 @@ OBSERVE_INTERACTIVE_ELEMENTS = r"""
     const scrollHeight = scrollingElement?.scrollHeight ?? document.documentElement.scrollHeight;
     return {
         elements: observations,
+        text: normalize(document.body?.innerText),
+        scroll_position: [Math.round(scrollX), Math.round(scrollTop)],
         can_scroll_up: scrollTop > 1,
         can_scroll_down: scrollTop + innerHeight < scrollHeight - 1,
     };
@@ -195,3 +197,5 @@ class PageObservation:
     elements: tuple[InteractiveElement, ...]
     can_scroll_up: bool = False
     can_scroll_down: bool = False
+    fingerprint: str = ""
+    text: str = ""
