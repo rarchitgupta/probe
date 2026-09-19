@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 
-import { EnvironmentForm } from "@/components/environment-form"
-import { EnvironmentList } from "@/components/environment-list"
+import { EnvironmentForm } from "@/components/environments/environment-form"
+import { EnvironmentList } from "@/components/environments/environment-list"
 
 export const metadata: Metadata = {
   title: "Environments",

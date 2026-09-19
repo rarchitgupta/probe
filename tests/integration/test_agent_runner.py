@@ -13,10 +13,11 @@ from openai import APITimeoutError
 from pydantic_ai import ModelAPIError, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from qa_agent.agent import AgentTask
-from qa_agent.evaluation import EvaluationCase, run_trial
+from qa_agent.agent.planning import AgentTask
+from qa_agent.agent.runner import execute_agent_task
+from qa_agent.evaluation.models import EvaluationCase
+from qa_agent.evaluation.runner import run_trial
 from qa_agent.failures import FailureCategory
-from qa_agent.runner import execute_agent_task
 
 pytestmark = pytest.mark.browser
 

@@ -6,13 +6,13 @@ from urllib.parse import quote
 
 import pytest
 
-from qa_agent.assertions import (
+from qa_agent.agent.assertions import (
     RegionContainsAssertion,
     TextVisibleAssertion,
     TitleEqualsAssertion,
     UrlContainsAssertion,
 )
-from qa_agent.browser import BrowserSession
+from qa_agent.browser.session import BrowserSession
 
 pytestmark = pytest.mark.browser
 

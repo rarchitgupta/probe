@@ -5,22 +5,18 @@ import asyncio
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 
-from qa_agent.agent import AgentTask
-from qa_agent.evaluation import (
+from qa_agent.agent.planning import AgentTask
+from qa_agent.agent.runner import AgentTaskResult, execute_agent_task
+from qa_agent.evaluation.models import (
     BenchmarkComparison,
     BenchmarkResult,
-    compare_reports,
     load_evaluation_suite,
-    load_report,
-    run_suite,
-    write_report,
 )
+from qa_agent.evaluation.reporting import compare_reports, load_report, write_report
+from qa_agent.evaluation.runner import run_suite
 from qa_agent.llm import DEEPSEEK_MODEL_NAME
-from qa_agent.runner import AgentTaskResult, execute_agent_task
-from qa_agent.runs import RunQueueService, RunStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,7 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("url")
     run.add_argument("goal")
     run.add_argument("--artifacts", type=Path, default=Path(".runs"))
-    run.add_argument("--queued", action="store_true")
     run.add_argument("--json", action="store_true", dest="json_output")
 
     evaluate = commands.add_parser("eval", help="Run a browser QA evaluation suite")
@@ -40,23 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--baseline", type=Path)
     evaluate.add_argument("--artifacts", type=Path, default=Path(".eval-runs"))
     return parser
-
-
-async def execute_queued_task(task: AgentTask, artifact_root: Path) -> AgentTaskResult:
-    service = RunQueueService(
-        RunStore(),
-        executor=partial(execute_agent_task, artifact_root=artifact_root),
-    )
-    await service.start()
-    try:
-        await service.submit(task)
-        await service.join()
-        run = await service.get_details(task.task_id)
-        if not run or not run.result:
-            raise RuntimeError(run.error if run else "Queued run disappeared")
-        return run.result
-    finally:
-        await service.close()
 
 
 def format_agent_result(result: AgentTaskResult) -> str:
@@ -135,11 +113,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1 if comparison and comparison.quality_regressed else 0)
 
     task = AgentTask(start_url=args.url, goal=args.goal)
-    result = asyncio.run(
-        execute_queued_task(task, args.artifacts)
-        if args.queued
-        else execute_agent_task(task, artifact_root=args.artifacts)
-    )
+    result = asyncio.run(execute_agent_task(task, artifact_root=args.artifacts))
     print(
         json.dumps(asdict(result), indent=2)
         if args.json_output

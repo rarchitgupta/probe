@@ -13,19 +13,14 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy.exc import IntegrityError
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent.planning import AgentTask
 from qa_agent.artifacts import artifact_storage
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.failures import FailureCategory
-from qa_agent.runs import (
-    InvalidRunTransitionError,
-    RunEventKind,
-    RunService,
-    RunStatus,
-    RunStore,
-    TaskRun,
-    TemporalRunService,
-)
+from qa_agent.runs.models import RunEventKind, RunStatus
+from qa_agent.runs.service import RunService
+from qa_agent.runs.store import InvalidRunTransitionError, RunStore, TaskRun
+from qa_agent.runs.temporal import TemporalRunService
 
 
 class CreateRunRequest(BaseModel):

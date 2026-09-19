@@ -21,7 +21,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from qa_agent.assertions import AssertionResult, PageAssertion, evaluate_assertion
+from qa_agent.agent.assertions import AssertionResult, PageAssertion, evaluate_assertion
 from qa_agent.browser.observation import (
     ELEMENT_REFERENCE_ATTRIBUTE,
     INTERACTIVE_SELECTOR,

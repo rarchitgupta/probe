@@ -3,11 +3,11 @@
 import { use } from "react"
 
 import { useRun, useRunEvents, useRunStream } from "@/lib/runs"
-import { RunHeader } from "@/components/run-header"
-import { RunMetrics, RunOverview } from "@/components/run-overview"
-import { RunResults } from "@/components/run-results"
-import { RunReplay } from "@/components/run-replay"
-import { RunEvents } from "@/components/run-events"
+import { RunEvents } from "@/components/runs/run-events"
+import { RunHeader } from "@/components/runs/run-header"
+import { RunMetrics, RunOverview } from "@/components/runs/run-overview"
+import { RunReplay } from "@/components/runs/run-replay"
+import { RunResults } from "@/components/runs/run-results"
 import {
   Card,
   CardContent,

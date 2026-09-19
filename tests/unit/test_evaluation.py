@@ -6,20 +6,17 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from qa_agent.assertions import TextVisibleAssertion, UrlContainsAssertion
-from qa_agent.evaluation import (
+from qa_agent.agent.assertions import TextVisibleAssertion, UrlContainsAssertion
+from qa_agent.evaluation.models import (
     BenchmarkReport,
     BenchmarkResult,
     EvaluationSuite,
     TrialResult,
-    compare_reports,
+    TrialVerdict,
     load_evaluation_suite,
-    load_report,
-    run_suite,
-    summarize_trials,
-    write_report,
 )
-from qa_agent.evaluation.models import TrialVerdict
+from qa_agent.evaluation.reporting import compare_reports, load_report, write_report
+from qa_agent.evaluation.runner import run_suite, summarize_trials
 
 
 def _suite_data() -> dict[str, object]:

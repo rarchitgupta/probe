@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from playwright.async_api import Page
 
-from qa_agent.assertions import AssertionResult, PageAssertion, evaluate_assertion
+from qa_agent.agent.assertions import AssertionResult, PageAssertion, evaluate_assertion
 
 
 @dataclass(frozen=True)

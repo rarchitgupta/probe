@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
-from qa_agent.runs.store import RunArtifact, RunEvent, RunStatus, RunStore, TaskRun
+from qa_agent.runs.models import RunStatus
+from qa_agent.runs.store import RunArtifact, RunEvent, RunStore, TaskRun
 
 
 class RunService:

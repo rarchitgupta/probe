@@ -9,9 +9,10 @@ from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
 from qa_agent.runs.execution import execute_stored_run
-from qa_agent.temporal import QARunWorkflow
+from qa_agent.runs.models import RunStatus
+from qa_agent.runs.store import InvalidRunTransitionError, RunStore
+from qa_agent.runs.workflow import QARunWorkflow
 
 
 @activity.defn(name="execute_qa_run")

@@ -17,9 +17,8 @@ from playwright.async_api import Page
 from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
 from pydantic_ai.models import Model
 
-from qa_agent.agent import (
-    ActionDiagnostic,
-    AgentDeps,
+from qa_agent.agent.loop import run_plan
+from qa_agent.agent.planning import (
     AgentTask,
     ProgressEntry,
     page_state,
@@ -27,9 +26,9 @@ from qa_agent.agent import (
     spec_agent,
     validate_task_inputs,
 )
-from qa_agent.agent.loop import run_plan
+from qa_agent.agent.runtime import ActionDiagnostic, AgentDeps
 from qa_agent.artifacts import ArtifactPaths
-from qa_agent.browser import BrowserSession
+from qa_agent.browser.session import BrowserSession
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.environments import EnvironmentProfile, resolve_environment
 from qa_agent.failures import FailureCategory

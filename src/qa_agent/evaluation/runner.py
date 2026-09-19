@@ -9,7 +9,12 @@ from uuid import uuid4
 from playwright.async_api import Page
 from pydantic_ai.models import Model
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent.planning import AgentTask
+from qa_agent.agent.runner import (
+    AGENT_EXECUTION_POLICY,
+    AgentTaskResult,
+    execute_agent_task,
+)
 from qa_agent.evaluation.grading import OutcomeGrade, grade_page
 from qa_agent.evaluation.models import (
     BenchmarkMetrics,
@@ -20,7 +25,6 @@ from qa_agent.evaluation.models import (
     TrialVerdict,
 )
 from qa_agent.failures import FailureCategory
-from qa_agent.runner import AGENT_EXECUTION_POLICY, AgentTaskResult, execute_agent_task
 
 
 async def run_trial(

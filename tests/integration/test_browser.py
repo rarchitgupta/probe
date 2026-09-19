@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import pytest
 
-from qa_agent.browser import (
+from qa_agent.browser.session import (
     BrowserSession,
     ClickAction,
     FillAction,

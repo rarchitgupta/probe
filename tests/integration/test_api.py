@@ -7,19 +7,14 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent.planning import AgentTask
+from qa_agent.agent.runner import AgentTaskResult
 from qa_agent.api import app, lifespan
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
-from qa_agent.runner import AgentTaskResult
-from qa_agent.runs import (
-    RunArtifact,
-    RunEvent,
-    RunEventKind,
-    RunStatus,
-    TaskRun,
-    TemporalRunService,
-)
+from qa_agent.runs.models import RunEventKind, RunStatus
+from qa_agent.runs.store import RunArtifact, RunEvent, TaskRun
+from qa_agent.runs.temporal import TemporalRunService
 
 
 class TestApiLifespan:

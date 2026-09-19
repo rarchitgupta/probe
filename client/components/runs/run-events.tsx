@@ -1,16 +1,6 @@
 import { CheckIcon, ChevronRightIcon, CircleDotIcon, XIcon } from "lucide-react"
 
-import { Badge } from "@/components/reui/badge"
-import { Frame, FrameHeader, FramePanel } from "@/components/reui/frame"
-import {
-  Timeline,
-  TimelineContent,
-  TimelineHeader,
-  TimelineIndicator,
-  TimelineItem,
-  TimelineSeparator,
-  TimelineTitle,
-} from "@/components/reui/timeline"
+import { Badge } from "@/components/ui/badge"
 import {
   Collapsible,
   CollapsibleContent,
@@ -61,14 +51,20 @@ function EventIcon({ event, active }: { event: RunEvent; active: boolean }) {
 }
 
 function EventTime({ event }: { event: RunEvent }) {
-  const variant = eventFailed(event)
-    ? "destructive-light"
-    : event.status === "running"
-      ? "info-light"
-      : "success-light"
+  const failed = eventFailed(event)
+  const running = event.status === "running"
 
   return (
-    <Badge variant={variant} size="sm">
+    <Badge
+      variant={failed ? "destructive" : "outline"}
+      className={cn(
+        "h-4.5 px-1 py-0.5 text-[0.625rem] leading-none",
+        !failed &&
+          (running
+            ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300")
+      )}
+    >
       {new Date(event.created_at).toLocaleTimeString()}
     </Badge>
   )
@@ -80,44 +76,49 @@ export function RunEvents({ events }: { events: RunEvent[] }) {
   }
 
   return (
-    <Timeline value={events.length}>
+    <div className="flex flex-col">
       {events.map((event, index) => {
         const failed = eventFailed(event)
         const active = index === events.length - 1 && event.status === "running"
 
         return (
-          <TimelineItem
+          <div
             key={event.id}
-            step={index + 1}
             className={cn(
-              "ms-10 last:pb-0",
+              "relative ms-10 flex flex-col gap-0.5 last:pb-0",
               event.kind === "action" ? "pb-10" : "pb-6"
             )}
           >
-            <TimelineHeader>
-              <TimelineSeparator className="group-data-[orientation=vertical]/timeline:-left-7 group-data-[orientation=vertical]/timeline:h-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=vertical]/timeline:translate-y-7" />
+            {index < events.length - 1 && (
+              <div
+                aria-hidden
+                className="absolute -left-7 top-7 h-[calc(100%-1.75rem)] w-0.5 -translate-x-1/2 bg-primary"
+              />
+            )}
+            <div>
               <div className="flex flex-wrap items-center gap-2">
-                <TimelineTitle className="text-sm font-semibold capitalize">
+                <h3 className="text-sm font-semibold capitalize">
                   {eventTitle(event)}
-                </TimelineTitle>
+                </h3>
                 <EventTime event={event} />
               </div>
-              <TimelineIndicator
+              <div
+                aria-hidden
                 className={cn(
-                  "flex size-6 items-center justify-center border-none bg-primary text-primary-foreground group-data-[orientation=vertical]/timeline:-left-7",
+                  "absolute top-0 -left-7 flex size-6 -translate-x-1/2 items-center justify-center rounded-full bg-primary text-primary-foreground",
                   active && "ring-2 ring-primary/20",
                   failed && "bg-destructive text-white"
                 )}
               >
                 <EventIcon event={event} active={active} />
-              </TimelineIndicator>
-            </TimelineHeader>
+              </div>
+            </div>
             {event.kind === "action" && (
-              <TimelineContent className="mt-2">
-                <Frame stacked dense spacing="sm">
+              <div className="mt-2 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-muted/50">
                   <Collapsible defaultOpen className="group/collapsible">
                     <CollapsibleTrigger className="flex w-full">
-                      <FrameHeader className="flex grow flex-row items-center justify-between gap-2">
+                      <div className="flex grow flex-row items-center justify-between gap-2 px-3 py-1.5">
                         <div className="flex min-w-0 items-center gap-2">
                           <CircleDotIcon className="size-4 shrink-0 text-muted-foreground" />
                           <span className="truncate text-xs font-medium text-muted-foreground capitalize">
@@ -125,27 +126,27 @@ export function RunEvents({ events }: { events: RunEvent[] }) {
                           </span>
                         </div>
                         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-open/collapsible:rotate-90" />
-                      </FrameHeader>
+                      </div>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                      <FramePanel>
+                      <div className="rounded-xl border bg-card px-3 py-3.5 shadow-xs">
                         <p className="text-sm leading-relaxed text-muted-foreground">
                           {eventDescription(event)}
                         </p>
-                      </FramePanel>
+                      </div>
                     </CollapsibleContent>
                   </Collapsible>
-                </Frame>
-              </TimelineContent>
+                </div>
+              </div>
             )}
             {event.kind === "assertion" && (
-              <TimelineContent className="mt-1 text-xs leading-relaxed break-words">
+              <div className="mt-1 text-xs leading-relaxed break-words text-muted-foreground">
                 {eventDescription(event)}
-              </TimelineContent>
+              </div>
             )}
-          </TimelineItem>
+          </div>
         )
       })}
-    </Timeline>
+    </div>
   )
 }

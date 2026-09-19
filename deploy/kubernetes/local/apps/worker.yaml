@@ -17,7 +17,7 @@ spec:
         - name: worker
           image: probe-backend:local
           imagePullPolicy: IfNotPresent
-          command: ["python", "-m", "qa_agent.temporal_worker"]
+          command: ["python", "-m", "qa_agent.runs.worker"]
           envFrom:
             - configMapRef:
                 name: probe-config

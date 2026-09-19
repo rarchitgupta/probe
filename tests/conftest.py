@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from qa_agent.artifacts import LocalArtifactStorage
 from qa_agent.database import Base
-from qa_agent.runs import RunStore
+from qa_agent.runs.store import RunStore
 
 
 @pytest_asyncio.fixture

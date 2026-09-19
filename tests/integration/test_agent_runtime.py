@@ -14,7 +14,7 @@ from qa_agent.agent.planning import (
     page_state,
 )
 from qa_agent.agent.runtime import AgentDeps, execute_instructions, perform_fill_form
-from qa_agent.browser import BrowserSession
+from qa_agent.browser.session import BrowserSession
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
 pytestmark = pytest.mark.browser

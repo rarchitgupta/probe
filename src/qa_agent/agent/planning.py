@@ -8,7 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 from pydantic_ai import Agent
 
-from qa_agent.browser import PageObservation
+from qa_agent.browser.observation import PageObservation
 from qa_agent.failures import FailureCategory
 
 SENSITIVE_SUMMARY_VALUE = re.compile(
@@ -157,37 +157,8 @@ class WaitInstruction(BaseModel):
     action: Literal["wait"]
 
 
-class AssertionInstruction(BaseModel):
-    action: Literal[
-        "assert_text_visible",
-        "assert_url_contains",
-        "assert_title_equals",
-        "assert_dialog_message",
-    ]
-    expected: str
-    exact: bool = False
-
-
-class CheckedInstruction(BaseModel):
-    action: Literal["assert_checked"]
-    element_id: int
-    expected: bool
-
-
-class SelectedOptionInstruction(BaseModel):
-    action: Literal["assert_selected_option"]
-    element_id: int
-    expected: str
-
-
 AgentInstruction = Annotated[
-    ClickInstruction
-    | FillFormInstruction
-    | ScrollInstruction
-    | WaitInstruction
-    | AssertionInstruction
-    | CheckedInstruction
-    | SelectedOptionInstruction,
+    ClickInstruction | FillFormInstruction | ScrollInstruction | WaitInstruction,
     Field(discriminator="action"),
 ]
 

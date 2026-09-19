@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { PlusIcon } from "lucide-react"
 
-import { RunListItem } from "@/components/run-list-item"
+import { RunListItem } from "@/components/runs/run-list-item"
 import { Card, CardContent } from "@/components/ui/card"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"

@@ -84,7 +84,7 @@ services:
     build: .
     init: true
     ipc: host
-    command: ["python", "-m", "qa_agent.temporal_worker"]
+    command: ["python", "-m", "qa_agent.runs.worker"]
     environment:
       <<: *probe-runtime-environment
       PROBE_TEMPORAL_ADDRESS: ${PROBE_CONTAINER_TEMPORAL_ADDRESS:-temporal:7233}

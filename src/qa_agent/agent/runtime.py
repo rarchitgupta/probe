@@ -4,10 +4,20 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Literal
 
+from qa_agent.agent.assertions import (
+    AssertionResult,
+    BrowserAssertion,
+    CheckedAssertion,
+    DialogMessageAssertion,
+    RegionContainsAssertion,
+    SelectedOptionAssertion,
+    TextVisibleAssertion,
+    TitleEqualsAssertion,
+    UrlContainsAssertion,
+)
+from qa_agent.agent.execution import execute_guarded_action
 from qa_agent.agent.planning import (
     AgentInstruction,
-    AssertionInstruction,
-    CheckedInstruction,
     ClickInstruction,
     ElementState,
     FillFormInstruction,
@@ -21,18 +31,7 @@ from qa_agent.agent.planning import (
     WaitInstruction,
     page_state,
 )
-from qa_agent.assertions import (
-    AssertionResult,
-    BrowserAssertion,
-    CheckedAssertion,
-    DialogMessageAssertion,
-    RegionContainsAssertion,
-    SelectedOptionAssertion,
-    TextVisibleAssertion,
-    TitleEqualsAssertion,
-    UrlContainsAssertion,
-)
-from qa_agent.browser import (
+from qa_agent.browser.session import (
     BrowserSession,
     ClickAction,
     FillAction,
@@ -41,7 +40,6 @@ from qa_agent.browser import (
     SetCheckedAction,
 )
 from qa_agent.environments import resolve_secret
-from qa_agent.execution import execute_guarded_action
 from qa_agent.failures import FailureCategory
 from qa_agent.policy import ExecutionGuard, PolicyViolation
 
@@ -312,34 +310,7 @@ async def execute_instructions(
                     failure_category=deps.failure_category,
                 )
         else:
-            assertion: BrowserAssertion
-            if isinstance(instruction, AssertionInstruction):
-                if instruction.action == "assert_text_visible":
-                    assertion = TextVisibleAssertion(
-                        "text_visible", instruction.expected, instruction.exact
-                    )
-                elif instruction.action == "assert_url_contains":
-                    assertion = UrlContainsAssertion(
-                        "url_contains", instruction.expected
-                    )
-                elif instruction.action == "assert_title_equals":
-                    assertion = TitleEqualsAssertion(
-                        "title_equals", instruction.expected
-                    )
-                else:
-                    assertion = DialogMessageAssertion(
-                        "dialog_message", instruction.expected
-                    )
-            elif isinstance(instruction, CheckedInstruction):
-                assertion = CheckedAssertion(
-                    "checked", instruction.element_id, instruction.expected
-                )
-            else:
-                assertion = SelectedOptionAssertion(
-                    "selected_option", instruction.element_id, instruction.expected
-                )
-            target = str(assertion.expected)
-            result = await _assert(deps, assertion)
+            raise AssertionError(f"Unsupported instruction: {instruction!r}")
 
         completed += 1
         progress.append(
@@ -356,8 +327,6 @@ async def execute_instructions(
                     if isinstance(instruction, WaitInstruction)
                     else "page_may_have_changed"
                     if isinstance(instruction, (ClickInstruction, ScrollInstruction))
-                    else "asserted"
-                    if not isinstance(instruction, FillFormInstruction)
                     else "fields_updated"
                 ),
                 error=result.error,

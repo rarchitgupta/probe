@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from qa_agent.browser import ActionResult, BrowserAction, BrowserSession
+from qa_agent.browser.session import ActionResult, BrowserAction, BrowserSession
 from qa_agent.failures import FailureCategory
 from qa_agent.policy import ExecutionGuard, PolicyViolation
 

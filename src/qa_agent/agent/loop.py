@@ -10,11 +10,8 @@ from pydantic_ai.models import Model
 from pydantic_ai.settings import ModelSettings
 
 from qa_agent.agent.planning import (
-    AssertionInstruction,
-    CheckedInstruction,
     ProgressEntry,
     RegionContainsCheck,
-    SelectedOptionInstruction,
     TestSpec,
     build_step_prompt,
     page_state,
@@ -161,18 +158,6 @@ async def run_plan(
             deps.failure_category = (
                 deps.failure_category or FailureCategory.ACTION_FAILURE
             )
-        if step.check is not None and any(
-            isinstance(
-                action,
-                (AssertionInstruction, CheckedInstruction, SelectedOptionInstruction),
-            )
-            for action in decision.actions
-        ):
-            feedback = (
-                "The success check is pinned and runs automatically. Use only browser "
-                "actions to expose the required state."
-            )
-            continue
             return (
                 "blocked" if decision.blocked else "failed",
                 sanitize_summary(decision.failure, deps.sensitive_values),

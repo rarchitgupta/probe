@@ -3,10 +3,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from temporalio.client import Client
 
-from qa_agent.agent import AgentTask
+from qa_agent.agent.planning import AgentTask
 from qa_agent.failures import FailureCategory
-from qa_agent.runs import RunStatus, RunStore, TemporalRunService
-from qa_agent.temporal import QARunWorkflow
+from qa_agent.runs.models import RunStatus
+from qa_agent.runs.store import RunStore
+from qa_agent.runs.temporal import TemporalRunService
+from qa_agent.runs.workflow import QARunWorkflow
 
 
 async def test_submits_and_cancels_temporal_workflow(run_store: RunStore) -> None:

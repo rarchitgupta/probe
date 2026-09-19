@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from qa_agent.agent import AgentTask, ProgressEntry
-from qa_agent.runner import AgentTaskResult, execute_agent_task
-from qa_agent.runs.store import RunStatus, RunStore, TaskRun
+from qa_agent.agent.planning import AgentTask, ProgressEntry
+from qa_agent.agent.runner import AgentTaskResult, execute_agent_task
+from qa_agent.runs.models import RunStatus
+from qa_agent.runs.store import RunStore, TaskRun
 
 RunExecutor = Callable[[AgentTask], Awaitable[AgentTaskResult]]
 UpdateHandler = Callable[[], Awaitable[None]]

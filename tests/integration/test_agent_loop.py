@@ -9,7 +9,7 @@ from pydantic_ai.models.function import FunctionModel
 from qa_agent.agent.loop import run_plan
 from qa_agent.agent.planning import TestSpec as Plan
 from qa_agent.agent.runtime import AgentDeps
-from qa_agent.browser import BrowserSession
+from qa_agent.browser.session import BrowserSession
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy
 
 pytestmark = pytest.mark.browser

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from qa_agent.assertions import AssertionResult, PageAssertion
+from qa_agent.agent.assertions import AssertionResult, PageAssertion
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.failures import FailureCategory
 

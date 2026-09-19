@@ -4,11 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.agent.planning import AgentTask, ProgressEntry
+from qa_agent.agent.runner import AgentTaskResult
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.environments import EnvironmentDefinition
-from qa_agent.runner import AgentTaskResult
-from qa_agent.runs import InvalidRunTransitionError, RunStatus, RunStore
+from qa_agent.runs.models import RunStatus
+from qa_agent.runs.store import InvalidRunTransitionError, RunStore
 
 
 class TestRunStore:

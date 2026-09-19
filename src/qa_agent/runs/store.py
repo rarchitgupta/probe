@@ -11,13 +11,13 @@ from uuid import uuid4
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from qa_agent.agent import AgentTask, ProgressEntry
+from qa_agent.agent.planning import AgentTask, ProgressEntry
+from qa_agent.agent.runner import AgentTaskResult
 from qa_agent.artifacts import ArtifactStorage, artifact_storage
 from qa_agent.configuration import AgentConfiguration
 from qa_agent.database import async_session_factory
 from qa_agent.environments import EnvironmentDefinition, EnvironmentProfile
 from qa_agent.failures import FailureCategory
-from qa_agent.runner import AgentTaskResult
 from qa_agent.runs.models import (
     RunArtifactRecord,
     RunEventKind,
