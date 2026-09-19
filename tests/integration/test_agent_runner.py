@@ -100,7 +100,7 @@ class TestAgentRunner:
                     ]
                 )
             timeout = APITimeoutError(request=httpx2.Request("POST", "https://model"))
-            raise ModelAPIError("deepseek-v4-flash", timeout.message) from timeout
+            raise ModelAPIError("gpt-5.6-terra", timeout.message) from timeout
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), PageHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -125,7 +125,7 @@ class TestAgentRunner:
         assert result.failure_category == FailureCategory.MODEL_TIMEOUT
         assert result.configuration is not None
         assert result.configuration.prompt_version == "6"
-        assert result.configuration.model_config_version == "1"
+        assert result.configuration.model_config_version == "2"
         assert len(result.diagnostics) == 1
         assert result.diagnostics[0].action == "fill"
 

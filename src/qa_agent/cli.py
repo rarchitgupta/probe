@@ -16,7 +16,7 @@ from qa_agent.evaluation.models import (
 )
 from qa_agent.evaluation.reporting import compare_reports, load_report, write_report
 from qa_agent.evaluation.runner import run_suite
-from qa_agent.llm import DEEPSEEK_MODEL_NAME
+from qa_agent.llm import OPENAI_MODEL_NAME
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
                 artifact_root=args.artifacts,
             )
         )
-        write_report(result, suite, output, model_name=DEEPSEEK_MODEL_NAME)
+        write_report(result, suite, output, model_name=OPENAI_MODEL_NAME)
         comparison = (
             compare_reports(load_report(args.baseline), load_report(output))
             if args.baseline

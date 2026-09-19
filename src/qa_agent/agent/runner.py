@@ -33,10 +33,10 @@ from qa_agent.configuration import AgentConfiguration
 from qa_agent.environments import EnvironmentProfile, resolve_environment
 from qa_agent.failures import FailureCategory
 from qa_agent.llm import (
-    DEEPSEEK_MODEL_NAME,
-    DEEPSEEK_SETTINGS,
     MODEL_REQUEST_TIMEOUT_SECONDS,
-    deepseek_model,
+    OPENAI_MODEL_NAME,
+    OPENAI_SETTINGS,
+    openai_model,
 )
 from qa_agent.observability import configure_observability
 from qa_agent.policy import ExecutionGuard, ExecutionPolicy, PolicyViolation
@@ -108,7 +108,7 @@ async def execute_agent_task(
         model=(
             str(getattr(model, "model_name", type(model).__name__))
             if model
-            else DEEPSEEK_MODEL_NAME
+            else OPENAI_MODEL_NAME
         )
     )
     try:
@@ -139,7 +139,7 @@ async def execute_agent_task(
                             element.id: element for element in initial_state.elements
                         },
                     )
-                    selected_model = model or deepseek_model()
+                    selected_model = model or openai_model()
                     trace_context = (
                         propagate_attributes(
                             session_id=task.task_id,
@@ -170,7 +170,7 @@ async def execute_agent_task(
                         spec_run = await spec_agent.run(
                             spec_goal,
                             model=selected_model,
-                            model_settings=None if model else DEEPSEEK_SETTINGS,
+                            model_settings=None if model else OPENAI_SETTINGS,
                             usage_limits=usage_limits,
                             usage=run_usage,
                         )
@@ -190,7 +190,7 @@ async def execute_agent_task(
                             spec_run.output,
                             deps,
                             model=selected_model,
-                            model_settings=None if model else DEEPSEEK_SETTINGS,
+                            model_settings=None if model else OPENAI_SETTINGS,
                             usage=run_usage,
                             usage_limits=usage_limits,
                             event_handler=event_handler,

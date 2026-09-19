@@ -28,7 +28,7 @@ Requirements: Docker and a DeepSeek API key.
 
 ```bash
 cp .env.example .env
-# Add DEEPSEEK_API_KEY to .env
+# Add OPENAI_API_KEY to .env
 docker compose up --build
 ```
 

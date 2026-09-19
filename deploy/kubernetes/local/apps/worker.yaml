@@ -22,11 +22,11 @@ spec:
             - configMapRef:
                 name: probe-config
           env:
-            - name: DEEPSEEK_API_KEY
+            - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: probe-app-secrets
-                  key: DEEPSEEK_API_KEY
+                  key: OPENAI_API_KEY
             - name: LANGFUSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 PROMPT_VERSION = "6"
-MODEL_CONFIG_VERSION = "1"
+MODEL_CONFIG_VERSION = "2"
 
 
 @dataclass(frozen=True)

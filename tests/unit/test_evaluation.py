@@ -194,7 +194,7 @@ def test_writes_portable_json_report_atomically(tmp_path) -> None:
     assert report.schema_version == 2
     assert report.metadata.model == "test-model"
     assert report.metadata.prompt_version == "6"
-    assert report.metadata.model_config_version == "1"
+    assert report.metadata.model_config_version == "2"
     assert report.metadata.git_commit == "abc123"
     assert report.suite.cases[0].goal == "Log in and verify the dashboard"
     assert report.result.metrics.success_rate == 1
@@ -242,7 +242,7 @@ def test_compares_candidate_against_compatible_baseline(tmp_path) -> None:
     assert comparison.baseline_commit == "baseline-commit"
     assert comparison.candidate_model == "candidate-model"
     assert comparison.baseline_prompt_version == "6"
-    assert comparison.candidate_model_config_version == "1"
+    assert comparison.candidate_model_config_version == "2"
 
 
 def test_rejects_comparison_between_different_suites(tmp_path) -> None:
