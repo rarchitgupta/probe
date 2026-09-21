@@ -39,6 +39,39 @@ class PageHandler(BaseHTTPRequestHandler):
 
 
 class TestAgentRunner:
+    async def test_rejected_plan_is_a_model_error(self) -> None:
+        async def respond(messages: list, info: AgentInfo) -> ModelResponse:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        info.output_tools[0].name,
+                        {"title": "Invalid plan", "steps": []},
+                    )
+                ]
+            )
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), PageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                result = await execute_agent_task(
+                    AgentTask(
+                        task_id="invalid-plan-run",
+                        goal="Check the page",
+                        start_url=f"http://127.0.0.1:{server.server_port}",
+                    ),
+                    model=FunctionModel(respond),
+                    artifact_root=Path(directory),
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+        assert result.failure_category == FailureCategory.MODEL_ERROR
+        assert "Exceeded maximum output retries" in (result.error or "")
+
     async def test_preserves_diagnostics_when_model_times_out(self) -> None:
         calls = 0
 
@@ -125,7 +158,7 @@ class TestAgentRunner:
         assert result.failure_category == FailureCategory.MODEL_TIMEOUT
         assert result.configuration is not None
         assert result.configuration.prompt_version == "6"
-        assert result.configuration.model_config_version == "1"
+        assert result.configuration.model_config_version == "2"
         assert len(result.diagnostics) == 1
         assert result.diagnostics[0].action == "fill"
 

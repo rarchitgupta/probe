@@ -216,7 +216,9 @@ async def _execute(
     )
 
 
-async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResult:
+async def _assert(
+    deps: AgentDeps, assertion: BrowserAssertion, *, timeout_ms: float = 5_000
+) -> AssertionResult:
     try:
         deps.guard.check_url(deps.browser.page.url if deps.browser.page else "")
     except PolicyViolation as exc:
@@ -240,7 +242,7 @@ async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResu
     elif isinstance(assertion, DialogMessageAssertion):
         result = deps.browser.assert_dialog_message(assertion.expected)
     else:
-        result = await deps.browser.assert_that(assertion)
+        result = await deps.browser.assert_that(assertion, timeout_ms=timeout_ms)
     if result.success:
         deps.failure_category = None
         deps.evidence.append(
@@ -251,7 +253,9 @@ async def _assert(deps: AgentDeps, assertion: BrowserAssertion) -> AssertionResu
     return result
 
 
-async def execute_check(deps: AgentDeps, check: PinnedCheck) -> AssertionResult:
+async def execute_check(
+    deps: AgentDeps, check: PinnedCheck, *, timeout_ms: float = 5_000
+) -> AssertionResult:
     if isinstance(check, RegionContainsCheck):
         assertion: BrowserAssertion = RegionContainsAssertion(
             "region_contains", check.anchor, tuple(check.expected)
@@ -264,7 +268,7 @@ async def execute_check(deps: AgentDeps, check: PinnedCheck) -> AssertionResult:
         assertion = TitleEqualsAssertion("title_equals", check.expected)
     else:
         assertion = DialogMessageAssertion("dialog_message", check.expected)
-    return await _assert(deps, assertion)
+    return await _assert(deps, assertion, timeout_ms=timeout_ms)
 
 
 async def execute_instructions(

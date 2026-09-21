@@ -32,6 +32,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
+To try Jev for browser decisions, add `TYPESAFE_API_KEY` and set
+`PROBE_DECISION_MODEL=jev` in `.env`, then rebuild. DeepSeek still creates the
+initial test plan; the default decision model remains `llm` for comparisons.
+
 Open the app at http://localhost:3000. The API documentation is available at
 http://localhost:8000/docs, MinIO at http://localhost:9001, and Temporal at
 http://localhost:8233.

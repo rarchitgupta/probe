@@ -343,7 +343,7 @@ class TestCreateRun:
         assert completed_json["result"]["configuration"] == {
             "model": "test-model",
             "prompt_version": "6",
-            "model_config_version": "1",
+            "model_config_version": "2",
         }
         assert cancelled_response.status_code == 200
         assert cancelled_response.json()["status"] == "cancelled"

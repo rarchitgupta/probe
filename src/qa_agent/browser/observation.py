@@ -149,6 +149,11 @@ OBSERVE_INTERACTIVE_ELEMENTS = r"""
             name: accessibleName(element),
             tag: element.tagName.toLowerCase(),
             input_type: element.tagName === 'INPUT' ? element.type : null,
+            context: element.form ? 'form'
+                : element.closest('nav, header') ? 'navigation'
+                : element.closest('footer') ? 'footer'
+                : element.closest('main') ? 'main' : 'page',
+            is_submit: role === 'button' && element.type === 'submit' && Boolean(element.form),
             disabled: Boolean(
                 element.disabled || element.getAttribute('aria-disabled') === 'true',
             ),
@@ -185,6 +190,8 @@ class InteractiveElement:
     tag: str
     input_type: str | None
     disabled: bool
+    context: str = "page"
+    is_submit: bool = False
     checked: bool | None = None
     selected_option: str | None = None
     filled: bool | None = None

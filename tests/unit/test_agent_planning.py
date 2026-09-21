@@ -21,19 +21,19 @@ from qa_agent.browser.observation import InteractiveElement, PageObservation
 
 
 class TestAgentPlanning:
-    def test_limits_generated_title_to_five_words(self) -> None:
-        with pytest.raises(ValueError, match="at most 5 words"):
-            AgentTestSpec(
-                title="This title contains far too many words",
-                steps=[
-                    AgentTestStep(
-                        id=1,
-                        kind="assertion",
-                        instruction="Verify",
-                        check={"assertion": "text_visible", "expected": "Ready"},
-                    )
-                ],
-            )
+    def test_long_title_does_not_invalidate_a_plan(self) -> None:
+        spec = AgentTestSpec(
+            title="Place order for two mechanical keyboards",
+            steps=[
+                AgentTestStep(
+                    id=1,
+                    kind="assertion",
+                    instruction="Verify",
+                    check={"assertion": "text_visible", "expected": "Ready"},
+                )
+            ],
+        )
+        assert spec.title == "Place order for two mechanical keyboards"
 
     def test_sanitizes_known_password_values(self) -> None:
         assert (

@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "sqlalchemy[asyncio]>=2.0.52",
     "temporalio>=1.32.0",
+    "typesafe-sdk>=0.7.0",
     "uvicorn>=0.52.3",
 ]
 

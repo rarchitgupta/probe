@@ -12,6 +12,25 @@ pytestmark = pytest.mark.browser
 
 
 class TestBrowserObservation:
+    async def test_distinguishes_navigation_button_from_form_submit(
+        self, tmp_path
+    ) -> None:
+        html = """
+            <header><nav><a href="/login"><button type="button">Sign in</button></a></nav></header>
+            <main><form><input aria-label="Username"><button>Sign in</button></form></main>
+        """
+        async with BrowserSession(trace_path=tmp_path / "trace.zip") as browser:
+            await browser.navigate(f"data:text/html,{quote(html)}")
+            observation = await browser.observe()
+
+        buttons = [
+            element for element in observation.elements if element.role == "button"
+        ]
+        assert [(item.name, item.context, item.is_submit) for item in buttons] == [
+            ("Sign in", "navigation", False),
+            ("Sign in", "form", True),
+        ]
+
     async def test_fingerprint_tracks_content_and_scroll_not_reference_ids(
         self, tmp_path
     ) -> None:

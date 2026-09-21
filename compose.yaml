@@ -1,6 +1,8 @@
 x-probe-runtime-environment: &probe-runtime-environment
   PROBE_DATABASE_URL: ${PROBE_CONTAINER_DATABASE_URL:-postgresql+asyncpg://probe:probe@postgres:5432/probe}
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+  PROBE_DECISION_MODEL: ${PROBE_DECISION_MODEL:-llm}
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
   LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
   LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}

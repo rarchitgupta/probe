@@ -34,6 +34,8 @@ class ElementState(BaseModel):
     name: str
     input_type: str | None
     disabled: bool
+    context: str = "page"
+    is_submit: bool = False
     checked: bool | None = None
     selected_option: str | None = None
     filled: bool | None = None
@@ -118,8 +120,6 @@ class TestSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_steps(self) -> TestSpec:
-        if len(self.title.split()) > 5:
-            raise ValueError("Title must contain at most 5 words")
         if [step.id for step in self.steps] != list(range(1, len(self.steps) + 1)):
             raise ValueError("Step IDs must be sequential, starting at 1")
         if self.steps[-1].kind != "assertion":
@@ -201,6 +201,8 @@ def page_state(observation: PageObservation) -> PageState:
                 name=element.name,
                 input_type=element.input_type,
                 disabled=element.disabled,
+                context=element.context,
+                is_submit=element.is_submit,
                 checked=element.checked,
                 selected_option=element.selected_option,
                 filled=element.filled,

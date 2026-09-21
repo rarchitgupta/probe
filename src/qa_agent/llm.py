@@ -17,6 +17,8 @@ DEEPSEEK_SETTINGS = OpenAIChatModelSettings(
     thinking=False,
     timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
 )
+DEEPSEEK_PLANNER_SETTINGS = DEEPSEEK_SETTINGS.copy()
+DEEPSEEK_PLANNER_SETTINGS["max_tokens"] = 2048
 
 
 def deepseek_model() -> OpenAIChatModel:

@@ -4,8 +4,9 @@ import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from contextlib import nullcontext
+from contextlib import AsyncExitStack, nullcontext
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
 from typing import Literal
@@ -14,9 +15,15 @@ from langfuse import propagate_attributes
 from openai import APITimeoutError
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
-from pydantic_ai import ModelAPIError, RunUsage, UsageLimits
+from pydantic_ai import ModelAPIError, RunUsage, UnexpectedModelBehavior, UsageLimits
 from pydantic_ai.models import Model
+from typesafe_sdk import (
+    AsyncTypeSafeClient,
+    TypeSafeAPITimeoutError,
+    TypeSafeError,
+)
 
+from qa_agent.agent.jev import JEV_DECISION_VERSION, JEV_MODEL, JevSelector
 from qa_agent.agent.loop import run_plan
 from qa_agent.agent.planning import (
     AgentTask,
@@ -29,11 +36,12 @@ from qa_agent.agent.planning import (
 from qa_agent.agent.runtime import ActionDiagnostic, AgentDeps
 from qa_agent.artifacts import ArtifactPaths
 from qa_agent.browser.session import BrowserSession
-from qa_agent.configuration import AgentConfiguration
+from qa_agent.configuration import PROMPT_VERSION, AgentConfiguration
 from qa_agent.environments import EnvironmentProfile, resolve_environment
 from qa_agent.failures import FailureCategory
 from qa_agent.llm import (
     DEEPSEEK_MODEL_NAME,
+    DEEPSEEK_PLANNER_SETTINGS,
     DEEPSEEK_SETTINGS,
     MODEL_REQUEST_TIMEOUT_SECONDS,
     deepseek_model,
@@ -104,13 +112,19 @@ async def execute_agent_task(
     deps: AgentDeps | None = None
     run_usage = RunUsage()
     duration_ms: int | None = None
+    use_jev = model is None and os.getenv("PROBE_DECISION_MODEL") == "jev"
     configuration = AgentConfiguration(
         model=(
             str(getattr(model, "model_name", type(model).__name__))
             if model
             else DEEPSEEK_MODEL_NAME
         )
+        + (f" + {JEV_MODEL}" if use_jev else ""),
+        prompt_version=(
+            f"{PROMPT_VERSION}+jev{JEV_DECISION_VERSION}" if use_jev else PROMPT_VERSION
+        ),
     )
+    jev_selector: JevSelector | None = None
     try:
         resolved_environment = resolve_environment(environment, str(task.start_url))
         async with asyncio.timeout(guard.remaining_seconds):
@@ -170,7 +184,7 @@ async def execute_agent_task(
                         spec_run = await spec_agent.run(
                             spec_goal,
                             model=selected_model,
-                            model_settings=None if model else DEEPSEEK_SETTINGS,
+                            model_settings=None if model else DEEPSEEK_PLANNER_SETTINGS,
                             usage_limits=usage_limits,
                             usage=run_usage,
                         )
@@ -186,15 +200,22 @@ async def execute_agent_task(
                             for task_input in task_inputs.values()
                             if task_input.sensitive and task_input.value in task.goal
                         )
-                        status, summary = await run_plan(
-                            spec_run.output,
-                            deps,
-                            model=selected_model,
-                            model_settings=None if model else DEEPSEEK_SETTINGS,
-                            usage=run_usage,
-                            usage_limits=usage_limits,
-                            event_handler=event_handler,
-                        )
+                        async with AsyncExitStack() as stack:
+                            if use_jev:
+                                client = await stack.enter_async_context(
+                                    AsyncTypeSafeClient(model=JEV_MODEL, timeout=5.0)
+                                )
+                                jev_selector = JevSelector(client)
+                            status, summary = await run_plan(
+                                spec_run.output,
+                                deps,
+                                model=selected_model,
+                                model_settings=None if model else DEEPSEEK_SETTINGS,
+                                usage=run_usage,
+                                usage_limits=usage_limits,
+                                jev_selector=jev_selector,
+                                event_handler=event_handler,
+                            )
                         failure_category = deps.failure_category
 
                         evidence = tuple(deps.evidence)
@@ -220,6 +241,15 @@ async def execute_agent_task(
         else:
             failure_category = FailureCategory.MODEL_ERROR
             error = f"{type(exc).__name__}: {exc}"
+    except UnexpectedModelBehavior as exc:
+        failure_category = FailureCategory.MODEL_ERROR
+        error = f"{type(exc).__name__}: {exc}"
+    except TypeSafeAPITimeoutError as exc:
+        failure_category = FailureCategory.MODEL_TIMEOUT
+        error = f"TypeSafeAPITimeoutError: {exc}"
+    except TypeSafeError as exc:
+        failure_category = FailureCategory.MODEL_ERROR
+        error = f"{type(exc).__name__}: {exc}"
     except TimeoutError:
         failure_category = FailureCategory.EXECUTION_TIMEOUT
         error = f"Execution timed out after {policy.timeout_seconds:g} seconds"
@@ -240,6 +270,19 @@ async def execute_agent_task(
     usage = asdict(run_usage)
     if usage.get("cost") is not None:
         usage["cost"] = str(usage["cost"])
+    if jev_selector:
+        jev_usage = jev_selector.usage()
+        usage["llm"] = {
+            "requests": usage["requests"],
+            "input_tokens": usage["input_tokens"],
+            "cost": usage["cost"],
+        }
+        usage["jev"] = jev_usage
+        usage["requests"] += jev_selector.requests
+        usage["input_tokens"] += jev_selector.input_tokens
+        usage["cost"] = str(
+            Decimal(str(usage["cost"] or 0)) + Decimal(str(jev_usage["cost"]))
+        )
     if status == "passed" and not keep_diagnostics:
         diagnostics = ()
 

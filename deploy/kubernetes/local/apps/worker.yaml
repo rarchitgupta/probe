@@ -27,6 +27,18 @@ spec:
                 secretKeyRef:
                   name: probe-app-secrets
                   key: DEEPSEEK_API_KEY
+            - name: TYPESAFE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: TYPESAFE_API_KEY
+                  optional: true
+            - name: PROBE_DECISION_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: probe-app-secrets
+                  key: PROBE_DECISION_MODEL
+                  optional: true
             - name: LANGFUSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:

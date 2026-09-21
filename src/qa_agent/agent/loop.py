@@ -1,5 +1,6 @@
 """Budgeted execution of an advisory plan with a bounded browser trajectory."""
 
+import asyncio
 from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from pydantic_ai import RunUsage, UsageLimits
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ModelSettings
 
+from qa_agent.agent.jev import JevSelector
 from qa_agent.agent.planning import (
     ProgressEntry,
     RegionContainsCheck,
@@ -77,11 +79,13 @@ async def run_plan(
     model_settings: ModelSettings | None,
     usage: RunUsage,
     usage_limits: UsageLimits,
+    jev_selector: JevSelector | None = None,
     event_handler: Callable[[ProgressEntry], Awaitable[None]] | None = None,
 ) -> tuple[Literal["passed", "failed", "blocked"], str]:
     history: deque[Transition] = deque(maxlen=20)
     progress: deque[ProgressEntry] = deque(maxlen=8)
     attempted_checks: set[tuple[int, str]] = set()
+    blocked_retries: set[tuple[int, str]] = set()
     verified_steps: set[int] = set()
     cursor = 0
     feedback: str | None = None
@@ -133,28 +137,44 @@ async def run_plan(
                     "The pinned check already failed on this unchanged page. Do not retry "
                     "or weaken it; scroll, navigate, wait for a real change, or report failure."
                 )
-        decision = (
-            await step_agent.run(
-                build_step_prompt(
-                    step,
-                    spec.steps[:cursor],
-                    list(progress),
-                    observation,
-                    deps.task_inputs,
-                    remaining_steps=spec.steps[cursor + 1 :],
-                    feedback=feedback
-                    or repetition_feedback(history, observation.fingerprint),
-                    sensitive_values=deps.sensitive_values,
-                    successful_field_updates=sorted(deps.successful_field_updates),
-                ),
-                model=model,
-                model_settings=model_settings,
-                usage=usage,
-                usage_limits=usage_limits,
+        if jev_selector:
+            decision = await jev_selector.decide(
+                step,
+                observation,
+                deps.task_inputs,
+                list(progress),
+                feedback or repetition_feedback(history, observation.fingerprint),
+                deps.successful_field_updates,
+                deps.sensitive_values,
             )
-        ).output
+        else:
+            decision = (
+                await step_agent.run(
+                    build_step_prompt(
+                        step,
+                        spec.steps[:cursor],
+                        list(progress),
+                        observation,
+                        deps.task_inputs,
+                        remaining_steps=spec.steps[cursor + 1 :],
+                        feedback=feedback
+                        or repetition_feedback(history, observation.fingerprint),
+                        sensitive_values=deps.sensitive_values,
+                        successful_field_updates=sorted(deps.successful_field_updates),
+                    ),
+                    model=model,
+                    model_settings=model_settings,
+                    usage=usage,
+                    usage_limits=usage_limits,
+                )
+            ).output
         feedback = None
         if decision.failure:
+            retry_key = (step.id, observation.url)
+            if decision.blocked and retry_key not in blocked_retries:
+                blocked_retries.add(retry_key)
+                await asyncio.sleep(0.4)
+                continue
             deps.failure_category = (
                 deps.failure_category or FailureCategory.ACTION_FAILURE
             )
@@ -194,6 +214,45 @@ async def run_plan(
         )
         if deps.failure_category == FailureCategory.POLICY_VIOLATION:
             return "failed", "Execution policy prevented further actions"
+        if (
+            jev_selector
+            and executed == len(decision.actions)
+            and batch
+            and all(entry.success for entry in batch)
+            and cursor + 1 < len(spec.steps)
+            and (next_check := spec.steps[cursor + 1].check) is not None
+        ):
+            result = await execute_check(deps, next_check, timeout_ms=100)
+            if result.success:
+                next_step = spec.steps[cursor + 1]
+                entry = ProgressEntry(
+                    action=next_check.assertion,
+                    target=(
+                        ", ".join([next_check.anchor, *next_check.expected])
+                        if isinstance(next_check, RegionContainsCheck)
+                        else next_check.expected
+                    ),
+                    success=True,
+                    effect="asserted",
+                )
+                progress.append(entry)
+                if event_handler:
+                    await event_handler(entry)
+                verified_steps.add(next_step.id)
+                cursor += 2
+                deps.successful_field_updates.clear()
+                if cursor == len(spec.steps):
+                    required = {
+                        item.id for item in spec.steps if item.check is not None
+                    }
+                    if verified_steps == required:
+                        deps.failure_category = None
+                        return "passed", f"Completed all {len(spec.steps)} test steps"
+                    return "failed", "Not all planned checks were verified"
+                continue
+            if deps.failure_category == FailureCategory.POLICY_VIOLATION:
+                return "failed", "Execution policy prevented further actions"
+            deps.failure_category = None
         if (
             not decision.step_complete
             or any(entry.action == "wait" for entry in batch)
